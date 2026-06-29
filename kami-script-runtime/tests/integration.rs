@@ -85,36 +85,37 @@ fn audio_queue_filled_by_play_sound() {
 }
 
 #[test]
-fn steam_queue_filled_by_steam_builtins() {
-    use kami_script_runtime::{SteamBackend, SteamEvent, StubSteam};
+fn service_queue_filled_by_service_builtins() {
+    use kami_script_runtime::{ServiceEvent, ServicesBackend, StubServices};
 
     let mut rt = make_runtime();
+    // The guest names LOGICAL keys — the same wasm runs on every store backend.
     let src = r#"
-      (defn init [] (steam-rich-presence! "status" "menu"))
+      (defn init [] (presence-set! "status" "menu"))
       (defn tick [dt]
-        (steam-unlock! "FIRST_WIN")
-        (steam-set-stat! "kills" 7))
+        (achievement-unlock! "first_win")
+        (stat-set! "kills" 7))
     "#;
-    rt.load_clj("steam-test", src).expect("compile+load");
-    rt.call_init("steam-test").expect("init");
-    // init emitted the rich-presence; drain it before the tick.
+    rt.load_clj("svc-test", src).expect("compile+load");
+    rt.call_init("svc-test").expect("init");
+    // init emitted the presence; drain it before the tick.
     assert_eq!(
-        rt.drain_steam_queue(),
-        vec![SteamEvent::SetRichPresence("status".into(), "menu".into())]
+        rt.drain_service_queue(),
+        vec![ServiceEvent::PresenceSet("status".into(), "menu".into())]
     );
-    rt.call_tick("steam-test", 16).expect("tick");
-    let events = rt.drain_steam_queue();
+    rt.call_tick("svc-test", 16).expect("tick");
+    let events = rt.drain_service_queue();
     assert_eq!(
         events,
         vec![
-            SteamEvent::UnlockAchievement("FIRST_WIN".into()),
-            SteamEvent::SetStat("kills".into(), 7),
+            ServiceEvent::AchievementUnlock("first_win".into()),
+            ServiceEvent::StatSet("kills".into(), 7),
         ]
     );
     // Draining twice yields nothing — the queue is consumed, not duplicated.
-    assert!(rt.drain_steam_queue().is_empty());
-    // The default backend accepts the batch without panicking (off-Steam path).
-    StubSteam.apply(events);
+    assert!(rt.drain_service_queue().is_empty());
+    // The default backend accepts the batch without panicking (off-platform path).
+    StubServices.apply(events);
 }
 
 #[test]

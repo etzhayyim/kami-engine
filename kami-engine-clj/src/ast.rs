@@ -158,13 +158,14 @@ pub enum Builtin {
     /// (kami.binaural); pos (x,y,z) + forward (fx,fy,fz) as f32.
     SetListener,
 
-    // ---- KAMI steam (Valve Steamworks, ADR-0048) ---------------------------
-    /// `(steam-unlock! id-str)` — unlock an achievement by Steamworks API name.
-    SteamUnlock,
-    /// `(steam-set-stat! name-str value-i64)` — set an integer stat absolute.
-    SteamSetStat,
-    /// `(steam-rich-presence! key-str val-str)` — set a rich-presence pair.
-    SteamRichPresence,
+    // ---- KAMI platform services (achievements/stats/presence, ADR-0049) ----
+    /// `(achievement-unlock! key-str)` — unlock an achievement by LOGICAL key
+    /// (the host maps key → active store id: Steam/PSN/GameCenter/Play/Nintendo).
+    AchievementUnlock,
+    /// `(stat-set! key-str value-i64)` — set an integer stat absolute, by key.
+    StatSet,
+    /// `(presence-set! key-str val-str)` — set a rich-presence pair.
+    PresenceSet,
 
     // ---- KAMI time ----------------------------------------------------------
     /// `(delta-ms)` → i64
@@ -231,9 +232,9 @@ impl Builtin {
             StopSound      => Some(HostImport::AudioStop),
             PlaySoundAt    => Some(HostImport::AudioPlayAt),
             SetListener    => Some(HostImport::AudioSetListener),
-            SteamUnlock       => Some(HostImport::SteamUnlock),
-            SteamSetStat      => Some(HostImport::SteamSetStat),
-            SteamRichPresence => Some(HostImport::SteamRichPresence),
+            AchievementUnlock => Some(HostImport::ServicesAchievementUnlock),
+            StatSet           => Some(HostImport::ServicesStatSet),
+            PresenceSet       => Some(HostImport::ServicesPresenceSet),
             DeltaMs        => Some(HostImport::TimeDeltaMs),
             ElapsedMs      => Some(HostImport::TimeElapsedMs),
             TickN          => Some(HostImport::TimeTick),
@@ -341,10 +342,10 @@ impl Builtin {
             "stop-sound"      => StopSound,
             "play-sound-at"   => PlaySoundAt,
             "set-listener!"   => SetListener,
-            // steam (Valve Steamworks, ADR-0048)
-            "steam-unlock!"        => SteamUnlock,
-            "steam-set-stat!"      => SteamSetStat,
-            "steam-rich-presence!" => SteamRichPresence,
+            // platform services (achievements/stats/presence, ADR-0049)
+            "achievement-unlock!"  => AchievementUnlock,
+            "stat-set!"            => StatSet,
+            "presence-set!"        => PresenceSet,
             // time
             "delta-ms"        => DeltaMs,
             "elapsed-ms"      => ElapsedMs,
@@ -406,8 +407,8 @@ pub enum HostImport {
     RenderDrawMesh, RenderSpawnParticle, RenderDrawLine, RenderRtEnable,
     // audio
     AudioPlay, AudioStop, AudioPlayAt, AudioSetListener,
-    // steam (Valve Steamworks, ADR-0048)
-    SteamUnlock, SteamSetStat, SteamRichPresence,
+    // platform services (achievements/stats/presence, ADR-0049)
+    ServicesAchievementUnlock, ServicesStatSet, ServicesPresenceSet,
     // time
     TimeDeltaMs, TimeElapsedMs, TimeTick,
     // query / RNG (survivors)
@@ -451,9 +452,9 @@ impl HostImport {
             AudioStop         => ("kami:engine/audio@1.0.0",   "stop"),
             AudioPlayAt       => ("kami:engine/audio@1.0.0",   "play-at"),
             AudioSetListener  => ("kami:engine/audio@1.0.0",   "set-listener"),
-            SteamUnlock       => ("kami:engine/steam@1.0.0",   "unlock-achievement"),
-            SteamSetStat      => ("kami:engine/steam@1.0.0",   "set-stat"),
-            SteamRichPresence => ("kami:engine/steam@1.0.0",   "set-rich-presence"),
+            ServicesAchievementUnlock => ("kami:engine/services@1.0.0", "achievement-unlock"),
+            ServicesStatSet           => ("kami:engine/services@1.0.0", "stat-set"),
+            ServicesPresenceSet       => ("kami:engine/services@1.0.0", "presence-set"),
             TimeDeltaMs       => ("kami:engine/time@1.0.0",    "delta-ms"),
             TimeElapsedMs     => ("kami:engine/time@1.0.0",    "elapsed-ms"),
             TimeTick          => ("kami:engine/time@1.0.0",    "tick"),
@@ -493,9 +494,9 @@ impl HostImport {
             AudioPlay | AudioStop => &[StringHandle],
             AudioPlayAt       => &[StringHandle, F32, F32, F32],
             AudioSetListener  => &[F32, F32, F32, F32, F32, F32],
-            SteamUnlock       => &[StringHandle],
-            SteamSetStat      => &[StringHandle, I64],
-            SteamRichPresence => &[StringHandle, StringHandle],
+            ServicesAchievementUnlock => &[StringHandle],
+            ServicesStatSet           => &[StringHandle, I64],
+            ServicesPresenceSet       => &[StringHandle, StringHandle],
             TimeDeltaMs | TimeElapsedMs | TimeTick => &[],
             RandomInt         => &[I64],
             SceneQueryBegin   => &[StringHandle],
@@ -525,7 +526,7 @@ impl HostImport {
             InputPointerX | InputPointerY      => F32,
             RenderDrawMesh | RenderSpawnParticle | RenderDrawLine | RenderRtEnable => Void,
             AudioPlay | AudioStop | AudioPlayAt | AudioSetListener => Void,
-            SteamUnlock | SteamSetStat | SteamRichPresence => Void,
+            ServicesAchievementUnlock | ServicesStatSet | ServicesPresenceSet => Void,
             TimeDeltaMs | TimeElapsedMs | TimeTick => I64,
             RandomInt | SceneQueryBegin | SceneQueryNext
             | SceneCountTagged | SceneNearest => I64,
@@ -1238,8 +1239,8 @@ fn check_builtin_arity(op: Builtin, n: usize) -> Result<(), CljError> {
 
         PointerX | PointerY | DeltaMs | ElapsedMs | TickN => n == 0,
 
-        SteamUnlock => n == 1,
-        SteamSetStat | SteamRichPresence => n == 2,
+        AchievementUnlock => n == 1,
+        StatSet | PresenceSet => n == 2,
 
         Store64 | Store32 | ByteAt | ByteAppend => n == 2,
 

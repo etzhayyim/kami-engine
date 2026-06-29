@@ -78,10 +78,12 @@ pub mod input_map;
 pub use input_map::{ButtonEdges, Edges, VirtualStick, apply_dead_zone};
 
 pub mod platform;
-pub use platform::{InputDefault, LogicHost, PlatformSpec, RenderBackend, Target, TexFmt};
+pub use platform::{
+    InputDefault, LogicHost, PlatformSpec, RenderBackend, ServiceStore, Target, TexFmt,
+};
 
-pub mod steam;
-pub use steam::{SteamBackend, SteamEvent, StubSteam};
+pub mod services;
+pub use services::{ServiceEvent, ServiceIds, ServicesBackend, StubServices};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -141,10 +143,11 @@ pub struct HostState {
     // --- Queues (drained by the engine after each tick) --------------------
     pub audio_queue: Vec<(String, [f32; 3])>,
     pub draw_queue: Vec<DrawCommand>,
-    /// Valve Steamworks effects emitted this tick (ADR-0048). Output-only — the
-    /// engine drains these into a `steam::SteamBackend`; nothing feeds back into
-    /// the sim, so runs stay deterministic across backends with/without Steam.
-    pub steam_queue: Vec<SteamEvent>,
+    /// Platform-service effects emitted this tick (achievements/stats/presence,
+    /// ADR-0049). Output-only — the engine drains these into a
+    /// `services::ServicesBackend` (Steam/PSN/GameCenter/Play/Nintendo); nothing
+    /// feeds back into the sim, so runs stay deterministic across stores+backends.
+    pub service_queue: Vec<ServiceEvent>,
 
     // --- Binaural listener pose (set-listener!): [px,py,pz, fx,fy,fz] -------
     /// Read by the audio backend (kami-audio) to spatialize `audio_queue`.
@@ -196,7 +199,7 @@ impl HostState {
             pointer_y: 0.0,
             audio_queue: Vec::new(),
             draw_queue: Vec::new(),
-            steam_queue: Vec::new(),
+            service_queue: Vec::new(),
             listener: [0.0, 0.0, 0.0, 0.0, 0.0, -1.0],
             rt_recipe: None,
             delta_ms: 0,
@@ -292,7 +295,7 @@ impl KamiScriptRuntime {
         bind_input(&mut linker)?;
         bind_render(&mut linker)?;
         bind_audio(&mut linker)?;
-        bind_steam(&mut linker)?;
+        bind_services(&mut linker)?;
         bind_time(&mut linker)?;
         bind_random(&mut linker)?;
 
@@ -568,11 +571,11 @@ impl KamiScriptRuntime {
         std::mem::take(&mut self.store.data_mut().audio_queue)
     }
 
-    /// Drain Valve Steamworks effects (achievement/stat/rich-presence) emitted
-    /// during the last tick (ADR-0048). Forward the batch to a
-    /// `steam::SteamBackend::apply`. Output-only — draining never affects the sim.
-    pub fn drain_steam_queue(&mut self) -> Vec<SteamEvent> {
-        std::mem::take(&mut self.store.data_mut().steam_queue)
+    /// Drain platform-service effects (achievement/stat/presence) emitted during
+    /// the last tick (ADR-0049). Forward the batch to a
+    /// `services::ServicesBackend::apply`. Output-only — never affects the sim.
+    pub fn drain_service_queue(&mut self) -> Vec<ServiceEvent> {
+        std::mem::take(&mut self.store.data_mut().service_queue)
     }
 
     /// Listener pose [px,py,pz, fx,fy,fz] last set via `set-listener!`
@@ -1219,52 +1222,52 @@ fn bind_audio(linker: &mut Linker<HostState>) -> Result<(), RuntimeError> {
 }
 
 // ---------------------------------------------------------------------------
-// Steam host bindings (Valve Steamworks, ADR-0048)
+// Platform-services host bindings (achievements/stats/presence, ADR-0049)
 //
-// Output-only effects sink, mirroring `bind_audio`: each call buffers a
-// `SteamEvent` the engine drains after the tick (see `drain_steam_queue`).
-// Nothing reads back, so the sim stays deterministic across backends regardless
-// of whether Steam is connected.
+// Platform-neutral, output-only effects sink mirroring `bind_audio`: each call
+// buffers a `ServiceEvent` (a LOGICAL key) the engine drains after the tick (see
+// `drain_service_queue`) into the active store backend. Nothing reads back, so
+// the sim stays deterministic across stores and across wasmtime/wasmi.
 // ---------------------------------------------------------------------------
 
-fn bind_steam(linker: &mut Linker<HostState>) -> Result<(), RuntimeError> {
-    let m = "kami:engine/steam@1.0.0";
+fn bind_services(linker: &mut Linker<HostState>) -> Result<(), RuntimeError> {
+    let m = "kami:engine/services@1.0.0";
 
-    // unlock-achievement(id-ptr, id-len)
+    // achievement-unlock(key-ptr, key-len)
     linker.func_wrap(
         m,
-        "unlock-achievement",
+        "achievement-unlock",
         |mut caller: Caller<'_, HostState>, ptr: i32, len: i32| {
-            let id = read_guest_str(&mut caller, ptr, len);
+            let key = read_guest_str(&mut caller, ptr, len);
             caller
                 .data_mut()
-                .steam_queue
-                .push(SteamEvent::UnlockAchievement(id));
+                .service_queue
+                .push(ServiceEvent::AchievementUnlock(key));
         },
     )?;
-    // set-stat(name-ptr, name-len, value)
+    // stat-set(key-ptr, key-len, value)
     linker.func_wrap(
         m,
-        "set-stat",
+        "stat-set",
         |mut caller: Caller<'_, HostState>, ptr: i32, len: i32, value: i64| {
-            let name = read_guest_str(&mut caller, ptr, len);
+            let key = read_guest_str(&mut caller, ptr, len);
             caller
                 .data_mut()
-                .steam_queue
-                .push(SteamEvent::SetStat(name, value));
+                .service_queue
+                .push(ServiceEvent::StatSet(key, value));
         },
     )?;
-    // set-rich-presence(key-ptr, key-len, val-ptr, val-len)
+    // presence-set(key-ptr, key-len, val-ptr, val-len)
     linker.func_wrap(
         m,
-        "set-rich-presence",
+        "presence-set",
         |mut caller: Caller<'_, HostState>, kptr: i32, klen: i32, vptr: i32, vlen: i32| {
             let key = read_guest_str(&mut caller, kptr, klen);
             let val = read_guest_str(&mut caller, vptr, vlen);
             caller
                 .data_mut()
-                .steam_queue
-                .push(SteamEvent::SetRichPresence(key, val));
+                .service_queue
+                .push(ServiceEvent::PresenceSet(key, val));
         },
     )?;
 

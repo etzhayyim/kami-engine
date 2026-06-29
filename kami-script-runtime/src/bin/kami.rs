@@ -84,6 +84,22 @@ fn print_plan(t: Target) {
         }
     );
     println!("  default input : {}", s.input.label());
+    println!(
+        "  services store: {}{}",
+        t.service_store().label(),
+        t.service_store()
+            .feature()
+            .map(|f| format!("  (feature: {f})"))
+            .unwrap_or_default()
+    );
+    println!(
+        "  steam dist    : {}",
+        if t.steam_distributable() {
+            "yes  (desktop depot + steam_appid.txt; bb services-package … steam)"
+        } else {
+            "no   (mobile/console first-party store, or web browser path)"
+        }
+    );
     println!();
     match (t.triple(), s.host_feature()) {
         (Some(triple), Some(feature)) => {

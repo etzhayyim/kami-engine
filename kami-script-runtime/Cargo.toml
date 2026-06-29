@@ -21,6 +21,10 @@ wasmi      = { version = "1", optional = true, default-features = false, feature
 hecs       = { workspace = true }
 thiserror  = { workspace = true }
 log        = { workspace = true }
+# Valve Steamworks binding (ADR-0048 Phase 3) — OFF by default. Pulls the SDK
+# redistributable + needs an App ID + a running Steam client, so it's gated to
+# real Steam desktop builds and never compiled in CI. See src/steam.rs.
+steamworks = { version = "0.11", optional = true }
 
 [features]
 default          = ["backend-wasmtime"]
@@ -28,6 +32,16 @@ backend-wasmtime = ["dep:wasmtime"]
 # Build the no-JIT host:  cargo check-native -p kami-script-runtime \
 #                           --no-default-features --features backend-wasmi
 backend-wasmi    = ["dep:wasmi"]
+# Platform-service store backends (ADR-0049). Off by default → StubServices.
+# `steam-sdk` links the real `steamworks` crate (needs SDK + App ID + client).
+# The console/mobile features link NO crate — they're in-repo skeletons the
+# native shell (ADR-0037 §4) fills in with its NDA SDK / objc / JNI — so they
+# compile under the feature without a device. Exactly one is enabled per build.
+steam-sdk        = ["dep:steamworks"]
+psn-sdk          = []
+switch-sdk       = []
+gamecenter       = []
+googleplay       = []
 
 [dev-dependencies]
 hecs = { workspace = true }

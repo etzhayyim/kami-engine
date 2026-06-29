@@ -59,7 +59,7 @@
 
 ;; ── 3rd source: the kami-clj Builtin→HostImport map (ast.rs). Names only (its signatures live in
 ;;    a separate table); a HostImport "SceneGetX" derives interface.fn "scene.get-x". ─────────────
-(def iface-prefixes ["Scene" "Physics" "Input" "Render" "Audio" "Time" "Random"])
+(def iface-prefixes ["Scene" "Physics" "Input" "Render" "Audio" "Services" "Time" "Random"])
 (defn- kebab [s] (-> s (str/replace #"(.)([A-Z])" "$1-$2") str/lower-case))
 (defn builtin-names [src]
   (set (for [[_ hi] (re-seq #"Some\(HostImport::(\w+)\)" src)

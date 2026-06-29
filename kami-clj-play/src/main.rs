@@ -276,6 +276,10 @@ struct Particle {
 struct Game {
     rt: KamiScriptRuntime,
     world: Arc<Mutex<hecs::World>>,
+    /// Platform-services sink (achievements/stats/presence, ADR-0049).
+    /// `StubServices` unless built with a store feature (e.g. `--features
+    /// steam-sdk`) on the matching platform.
+    services: Box<dyn kami_script_runtime::ServicesBackend>,
 }
 
 impl Game {
@@ -285,13 +289,22 @@ impl Game {
         rt.set_seed(0x5151_2737);
         rt.load_clj("game", logic).expect("compile+load logic.clj");
         rt.call_init("game").expect("init");
-        Self { rt, world }
+        // The packaged store build injects a ServiceIds resolver loaded from
+        // services.edn for the active store; the dev player uses StubServices
+        // (which ignores ids), so an empty map is correct here.
+        let mut services =
+            kami_script_runtime::services::default_backend(kami_script_runtime::ServiceIds::default());
+        // init() may already have emitted presence / unlocks; flush them.
+        services.apply(rt.drain_service_queue());
+        Self { rt, world, services }
     }
 
     fn step(&mut self, mx: f32, my: f32, player_speed: f32, arena: f32) {
         self.rt
             .feed_stick("MoveX", "MoveY", [mx * player_speed, my * player_speed]);
         self.rt.call_systems("game", 16).expect("systems");
+        // Forward this tick's platform-service effects (achievements/stats/presence).
+        self.services.apply(self.rt.drain_service_queue());
         self.rt.integrate(16);
         // Host-side f32 clamp keeps the player in the arena (guest is integer-only).
         let w = self.world.lock().unwrap();

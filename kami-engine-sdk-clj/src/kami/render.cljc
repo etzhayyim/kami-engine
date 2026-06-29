@@ -34,8 +34,12 @@
     (when-not cam
       (throw (ex-info "camera-ir: no entity with :camera/active? true" {})))
     {:view (m/invert-rigid (model-of cam))
-     :proj (m/perspective (:camera/fov cam 60.0) aspect
-                          (:camera/near cam 0.1) (:camera/far cam 1000.0))}))
+     :proj (if (= :ortho (:camera/projection cam))
+             ;; orthographic screen-space (2D boards, e.g. freeboard ADR-2606280200)
+             (m/ortho 0.0 (double (:camera/ortho-w cam 1280.0)) (double (:camera/ortho-h cam 720.0)) 0.0
+                      (:camera/near cam -1.0) (:camera/far cam 1.0))
+             (m/perspective (:camera/fov cam 60.0) aspect
+                            (:camera/near cam 0.1) (:camera/far cam 1000.0)))}))
 
 (def ^:private builtin-pipelines
   #{:pbr :sky :terrain :vegetation :character :water :voxel :particle :atlas})
@@ -45,6 +49,11 @@
   pipeline; otherwise the default built-in :pbr."
   [e]
   (if-let [s (:shader/asset e)] (asset-id s) :pbr))
+
+(defn- texture-of
+  "Texture asset id for an entity (a sampled image / glyph atlas), or nil."
+  [e]
+  (when-let [t (:texture/asset e)] (asset-id t)))
 
 (defn merge-instances
   "Group renderable entities (those carrying a :mesh/asset) sharing
@@ -60,22 +69,19 @@
                             (map second (ecs/query world #{:mesh/asset})))
         groups (group-by (juxt pipeline-of
                                #(asset-id (:mesh/asset %))
-                               #(asset-id (:material/asset %)))
+                               #(asset-id (:material/asset %))
+                               texture-of)
                          renderable)]
-    ;; NOTE: :tint is assembled per-instance from each entity's :material/tint RGBA
-    ;; (default opaque white). `kami.ipc/pack` emits it as a per-draw f16 column only
-    ;; under the opt-in v2 layout `(pack frame {:tint? true})`; the default v1 layout
-    ;; (camera-mat4 + per-draw model-mat4, the contract the kami-clj-host Rust
-    ;; decoder/fixture pins) omits it, so default output stays byte-identical.
-    (for [[[pipeline mesh material] ents] (sort-by (comp str first) groups)
+    (for [[[pipeline mesh material texture] ents] (sort-by (comp str first) groups)
           :let [models (vec (mapcat model-of ents))
-                tints  (vec (mapcat #(:material/tint % [1.0 1.0 1.0 1.0]) ents))]]
-      {:draw/pipeline pipeline
-       :draw/mesh     mesh
-       :draw/material material
-       :draw/instances {:count (count ents)
-                        :model models
-                        :tint  tints}})))
+                tints  (vec (mapcat #(get-in % [:material/params :tint] [1.0 1.0 1.0 1.0]) ents))]]
+      (cond-> {:draw/pipeline pipeline
+               :draw/mesh     mesh
+               :draw/material material
+               :draw/instances {:count (count ents)
+                                :model models
+                                :tint  tints}}
+        texture (assoc :draw/texture texture)))))
 
 (defn draws-for
   "Build the draw-list for one render pass. Currently the single :main pass holds

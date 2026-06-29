@@ -24,21 +24,30 @@
 (defn- ->u32 [xs] (js/Uint32Array. (into-array xs)))
 
 ;; A thin record wrapping the wasm `KamiCljHost` instance.
+;; NOTE: `host` is hinted ^js at every call site so the :advanced (Closure)
+;; release does NOT rename the wasm-bindgen method names (register_mesh /
+;; submit_frame / resize …). Without the hint Closure renames e.g.
+;; `.submit_frame` → `.Nc`, but the real wasm export keeps `submit_frame`, so the
+;; call becomes `host.Nc is not a function` at runtime (dev :compile hides this).
 (defrecord BrowserBackend [host]
   gpu/IGpuBackend
   (register-mesh! [_ id vertices indices]
-    (.register_mesh host id (->f32 vertices) (->u32 indices)))
+    (.register_mesh ^js host id (->f32 vertices) (->u32 indices)))
   (register-material! [_ id params]
-    (.register_material host id (->f32 (or params []))))
+    (.register_material ^js host id (->f32 (or params []))))
   (register-shader! [_ id wgsl layout]
-    (.register_shader host id wgsl (or layout "")))
+    (.register_shader ^js host id wgsl (or layout "")))
+  (register-texture! [_ id width height rgba]
+    (.register_texture ^js host id width height (->u8 rgba)))
+  (register-text! [_ id text size]
+    (.register_text ^js host id text size))
   (submit-frame! [_ packed]
     ;; packed = {:buffer :len :meta …}; meta travels as JSON, buffer as bytes.
-    (.submit_frame host
+    (.submit_frame ^js host
                    (js/JSON.stringify (clj->js (:meta packed)))
                    (->u8 (:buffer packed))))
   (resize! [_ w h]
-    (.resize host w h)))
+    (.resize ^js host w h)))
 
 (defn make
   "Create a browser GPU backend bound to canvas id `:canvas`. Returns a Promise
@@ -48,4 +57,4 @@
   [{:keys [canvas host-ctor]}]
   (let [el   (.getElementById js/document canvas)
         ctor (or host-ctor js/KamiCljHost)]
-    (.then (.create ctor el) ->BrowserBackend)))
+    (.then (.create ^js ctor el) ->BrowserBackend)))

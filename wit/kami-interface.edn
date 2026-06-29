@@ -68,6 +68,12 @@
            ;; (kami.binaural). pos (x,y,z) + forward (fx,fy,fz); up stays world-up.
            :set-listener {:params [[:x :f32] [:y :f32] [:z :f32] [:fx :f32] [:fy :f32] [:fz :f32]]}}}
 
+  :services
+  {:doc "platform achievement/stat/presence services — guest names a logical key, host maps it to the active store id (Steam/PSN/GameCenter/Play/Nintendo). Output-only (ADR-0049)"
+   :funcs {:achievement-unlock {:params [[:key :str]]}
+           :stat-set           {:params [[:key :str] [:value :i64]]}
+           :presence-set       {:params [[:key :str] [:value :str]]}}}
+
   :time
   {:doc "game clock"
    :funcs {:delta-ms   {:params [] :ret :i64}

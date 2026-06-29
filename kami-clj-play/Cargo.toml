@@ -28,3 +28,10 @@ bytemuck  = { workspace = true }
 default          = ["backend-wasmtime"]
 backend-wasmtime = ["kami-script-runtime/backend-wasmtime"]
 backend-wasmi    = ["kami-script-runtime/backend-wasmi"]
+# Platform-service store backends (ADR-0049) — pick the one for the build target.
+# Off by default → the player drains the service queue into StubServices.
+steam-sdk        = ["kami-script-runtime/steam-sdk"]
+psn-sdk          = ["kami-script-runtime/psn-sdk"]
+switch-sdk       = ["kami-script-runtime/switch-sdk"]
+gamecenter       = ["kami-script-runtime/gamecenter"]
+googleplay       = ["kami-script-runtime/googleplay"]

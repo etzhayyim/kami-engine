@@ -17,12 +17,20 @@
 (def contact-range (f32 20.0))
 (def spawn-radius  (f32 520.0))
 
+;; Platform-service tracking (ADR-0049): kill count drives the "kills" stat and
+;; the "first_blood" / "centurion" achievements. The game names LOGICAL keys, so
+;; the SAME wasm reports to Steam / Game Center / Google Play / PSN / Nintendo —
+;; the host maps key → store id. Calls are output-only: never touch the sim, so
+;; the run is bit-identical with or without a store connected.
+(defatom kills 0)
+
 (defn player []
   (nearest-tagged "player" (f32 0.0) (f32 0.0) (f32 1000000.0)))
 
 (defn init []
   (let [p (spawn-entity "player")]
-    (set-position! p (f32 0.0) (f32 0.0) (f32 0.0))))
+    (set-position! p (f32 0.0) (f32 0.0) (f32 0.0)))
+  (presence-set! "status" "playing"))
 
 ;; movement: host feeds analog axes (already scaled to px/s) into velocity.
 (defsystem control [dt]
@@ -56,7 +64,14 @@
       (when (not= p -1)
         (let [hit (nearest-tagged "enemy" (get-x p) (get-y p) weapon-range)]
           (when (not= hit -1)
-            (despawn-entity hit)))))))
+            (despawn-entity hit)
+            ;; record the kill → stat + milestone achievements (logical keys).
+            (set-atom! kills (inc (atom-val kills)))
+            (stat-set! "kills" (atom-val kills))
+            (when (= (atom-val kills) 1)
+              (achievement-unlock! "first_blood"))
+            (when (= (atom-val kills) 100)
+              (achievement-unlock! "centurion"))))))))
 
 ;; contact: an enemy that reaches the player is consumed.
 (defsystem contact [dt]

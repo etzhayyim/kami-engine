@@ -263,24 +263,25 @@ fn survivors_core_loop_compiles() {
     assert!(wasm.len() > 200, "suspiciously small module");
 }
 
-/// Valve Steamworks builtins (ADR-0048) compile and import `kami:engine/steam`.
+/// Platform-services builtins (ADR-0049) compile and import `kami:engine/services`.
 /// The import module name is stored UTF-8 in the WASM import section, so a build
-/// that references the steam seam carries the string verbatim.
+/// that references the services seam carries the string verbatim. The same wasm
+/// runs on every store backend — the guest names logical keys only.
 #[test]
-fn steam_builtins_compile_and_import_steam_interface() {
+fn services_builtins_compile_and_import_services_interface() {
     let src = r#"
         (defn init []
-          (steam-rich-presence! "status" "menu"))
+          (presence-set! "status" "menu"))
         (defsystem boss-kill [dt]
           (when (zero? (mod (tick-n) 10))
-            (steam-unlock! "FIRST_BOSS")
-            (steam-set-stat! "bosses" 1)))
+            (achievement-unlock! "first_boss")
+            (stat-set! "bosses" 1)))
     "#;
-    let wasm = compile_str(src).expect("steam builtins compile");
+    let wasm = compile_str(src).expect("services builtins compile");
     assert!(wasm.starts_with(b"\0asm"), "missing WASM magic");
-    let needle = b"kami:engine/steam@1.0.0";
+    let needle = b"kami:engine/services@1.0.0";
     assert!(
         wasm.windows(needle.len()).any(|w| w == needle),
-        "compiled module must import the kami:engine/steam interface"
+        "compiled module must import the kami:engine/services interface"
     );
 }

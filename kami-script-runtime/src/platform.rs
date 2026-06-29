@@ -64,6 +64,49 @@ pub enum InputDefault {
     Gamepad,
 }
 
+/// The platform achievement/stat/presence backend a target ships against
+/// (ADR-0049). The guest is store-agnostic; this is the host's `services` impl.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceStore {
+    /// No store services (web — the browser path).
+    None,
+    /// Valve Steamworks (desktop).
+    Steam,
+    /// Apple Game Center (iOS).
+    GameCenter,
+    /// Google Play Games Services (Android).
+    GooglePlay,
+    /// Sony PSN Trophies (PS5).
+    Psn,
+    /// Nintendo (Switch — title-side / NPLN).
+    Nintendo,
+}
+
+impl ServiceStore {
+    pub fn label(self) -> &'static str {
+        match self {
+            ServiceStore::None => "none",
+            ServiceStore::Steam => "steam",
+            ServiceStore::GameCenter => "gamecenter",
+            ServiceStore::GooglePlay => "googleplay",
+            ServiceStore::Psn => "psn",
+            ServiceStore::Nintendo => "nintendo",
+        }
+    }
+    /// The cargo feature the host links for this store's `services` backend.
+    /// `None` → `StubServices` (web / off-platform desktop).
+    pub fn feature(self) -> Option<&'static str> {
+        match self {
+            ServiceStore::None => None,
+            ServiceStore::Steam => Some("steam-sdk"),
+            ServiceStore::GameCenter => Some("gamecenter"),
+            ServiceStore::GooglePlay => Some("googleplay"),
+            ServiceStore::Psn => Some("psn-sdk"),
+            ServiceStore::Nintendo => Some("switch-sdk"),
+        }
+    }
+}
+
 /// The full per-target packaging decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlatformSpec {
@@ -130,6 +173,22 @@ impl Target {
     pub fn steam_distributable(self) -> bool {
         use Target::*;
         matches!(self, Mac | Linux | Windows)
+    }
+
+    /// The platform achievement/stat/presence store this target ships against
+    /// (ADR-0049). Desktop → Steam; the rest map to their first-party store. Web
+    /// has none. The guest never sees this — it names logical keys; the host's
+    /// `services` backend (selected by `ServiceStore::feature`) maps them.
+    pub fn service_store(self) -> ServiceStore {
+        use Target::*;
+        match self {
+            Web => ServiceStore::None,
+            Mac | Linux | Windows => ServiceStore::Steam,
+            Ios => ServiceStore::GameCenter,
+            Android => ServiceStore::GooglePlay,
+            Ps5 => ServiceStore::Psn,
+            Switch => ServiceStore::Nintendo,
+        }
     }
 
     /// The packaging decision for this target — the ADR-0037 matrix, in code.
@@ -227,7 +286,7 @@ impl Target {
                 .unwrap_or_else(|| "nil".into())
         };
         format!(
-            "{{:target \"{}\" :jit {} :host \"{}\" :feature {} :tex \"{}\" :render \"{}\" :input \"{}\" :triple {} :console-seam {}}}",
+            "{{:target \"{}\" :jit {} :host \"{}\" :feature {} :tex \"{}\" :render \"{}\" :input \"{}\" :triple {} :console-seam {} :steam {} :services \"{}\" :services-feature {}}}",
             self.tag(),
             s.jit_allowed,
             s.logic.label(),
@@ -237,6 +296,9 @@ impl Target {
             s.input.label(),
             q(self.triple()),
             s.console_seam,
+            self.steam_distributable(),
+            self.service_store().label(),
+            q(self.service_store().feature()),
         )
     }
 }
@@ -314,6 +376,42 @@ mod tests {
     }
 
     #[test]
+    fn service_store_matches_target() {
+        // Each target ships against its first-party store; web has none (ADR-0049).
+        let expect = |t: Target| match t {
+            Target::Web => ServiceStore::None,
+            Target::Mac | Target::Linux | Target::Windows => ServiceStore::Steam,
+            Target::Ios => ServiceStore::GameCenter,
+            Target::Android => ServiceStore::GooglePlay,
+            Target::Ps5 => ServiceStore::Psn,
+            Target::Switch => ServiceStore::Nintendo,
+        };
+        for t in Target::all() {
+            assert_eq!(t.service_store(), expect(t), "{:?} store", t);
+        }
+        // Steam-distributable desktop ⇔ Steam store; both derive the same set.
+        for t in Target::all() {
+            assert_eq!(
+                t.steam_distributable(),
+                t.service_store() == ServiceStore::Steam,
+                "{:?} steam/store agree",
+                t
+            );
+        }
+        // Every non-web store names a host feature; web/None names nothing.
+        assert!(ServiceStore::None.feature().is_none());
+        for store in [
+            ServiceStore::Steam,
+            ServiceStore::GameCenter,
+            ServiceStore::GooglePlay,
+            ServiceStore::Psn,
+            ServiceStore::Nintendo,
+        ] {
+            assert!(store.feature().is_some(), "{:?} needs a feature", store);
+        }
+    }
+
+    #[test]
     fn tag_roundtrips() {
         for t in Target::all() {
             assert_eq!(Target::from_tag(t.tag()), Some(t));
@@ -337,6 +435,24 @@ mod tests {
                 get("console-seam").and_then(|v| v.as_bool()),
                 Some(s.console_seam)
             );
+            assert_eq!(
+                get("steam").and_then(|v| v.as_bool()),
+                Some(t.steam_distributable())
+            );
+            assert_eq!(
+                get("services").and_then(|v| v.as_string()),
+                Some(t.service_store().label())
+            );
+            match t.service_store().feature() {
+                Some(f) => {
+                    assert_eq!(get("services-feature").and_then(|v| v.as_string()), Some(f))
+                }
+                None => assert!(
+                    get("services-feature").map_or(false, |v| v.is_nil()),
+                    "{} services-feature nil",
+                    t.tag()
+                ),
+            }
             assert_eq!(
                 get("host").and_then(|v| v.as_string()),
                 Some(s.logic.label())

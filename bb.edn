@@ -130,5 +130,69 @@
                         (println "✓ packaged" app
                                  (str "(host=" feature ", game data in Resources/game — relocatable)"))))}
 
+  ;; ---- platform services (achievements/stats/presence, ADR-0049) ---------
+  services-lint   {:doc  "Fail if logic.clj names a key absent from services.edn:  bb services-lint survivors"
+                   :task (binding [*command-line-args* (cons "lint" *command-line-args*)]
+                           (load-file "scripts/services.clj"))}
+
+  services-config {:doc  "Project services.edn → per-store id artifacts:  bb services-config survivors steam"
+                   :task (binding [*command-line-args* (cons "config" *command-line-args*)]
+                           (load-file "scripts/services.clj"))}
+
+  services-package {:doc  "Package a game for a target's store:  bb services-package survivors ios"
+                    :requires ([babashka.fs :as fs] [babashka.process :as p])
+                    :task (let [game   (or (first *command-line-args*) "survivors")
+                                target (or (second *command-line-args*) "mac")
+                                spec   (-> (p/shell {:out :string}
+                                                    "cargo" "run" "-q" "--target" "aarch64-apple-darwin"
+                                                    "-p" "kami-script-runtime" "--bin" "kami" "--" "spec" target)
+                                           :out edn/read-string)
+                                {:keys [triple feature services services-feature]} spec
+                                gdir   (str "kami-clj-play/games/" game)
+                                out    (str "dist/" services "/" game)]
+                            (when (= services "none")
+                              (println "✗" target "has no store services (web path).") (System/exit 3))
+                            ;; 1. author-time guard + 2. per-store id projection.
+                            (binding [*command-line-args* ["lint" game]]           (load-file "scripts/services.clj"))
+                            (binding [*command-line-args* ["config" game services]] (load-file "scripts/services.clj"))
+                            ;; 3. native-shell step diverges per target (ADR-0037 §4).
+                            (cond
+                              ;; desktop → real depot we can fully assemble here.
+                              (#{"mac" "linux" "windows"} target)
+                              (let [sdk?  (= "1" (System/getenv "KAMI_STORE_SDK"))
+                                    base  ["cargo" "build" "--release" "-p" "kami-clj-play" "--target" triple]
+                                    feats (cond-> [] (not= feature "backend-wasmtime") (into [feature])
+                                                     sdk? (conj services-feature))
+                                    args  (cond-> base (seq feats) (into (into ["--features"] [(str/join "," feats)])))]
+                                (println "→" (str/join " " args)
+                                         (if sdk? "" (str "(StubServices — set KAMI_STORE_SDK=1 to link " services-feature ")")))
+                                (apply shell args)
+                                (fs/copy (str "target/" triple "/release/kami-clj-play")
+                                         (str out "/kami-clj-play") {:replace-existing true})
+                                (doseq [f ["logic.clj" "scene.edn" "services.edn"]]
+                                  (fs/copy (str gdir "/" f) (str out "/" f) {:replace-existing true}))
+                                (println "✓" services "depot:" out
+                                         "— upload with steamcmd +run_app_build"))
+
+                              ;; iOS / Android → cross-build the host lib; the .ipa/.aab is the
+                              ;; native shell's job (Swift+GameKit / NativeActivity+JNI). We lay
+                              ;; the staging dir + game data + the resolved store ids.
+                              (#{"ios" "android"} target)
+                              (do (doseq [f ["logic.clj" "scene.edn" "services.edn"]]
+                                    (fs/copy (str gdir "/" f) (do (fs/create-dirs out) (str out "/" f))
+                                             {:replace-existing true}))
+                                  (println "→ host lib: cargo build --release -p kami-clj-play --target" triple
+                                           (if (= feature "backend-wasmtime") "" (str "--no-default-features --features " feature)))
+                                  (println "✓" target "staging:" out
+                                           (str "— remaining: " (if (= target "ios") ".ipa via Xcode+GameKit shell" ".aab via Gradle+JNI shell")
+                                                " (ADR-0037 §4); store ids in " services "-ids.edn")))
+
+                              ;; PS5 / Switch → NDA toolchain, out of repo.
+                              :else
+                              (do (fs/create-dirs out)
+                                  (doseq [f ["services.edn"]] (fs/copy (str gdir "/" f) (str out "/" f) {:replace-existing true}))
+                                  (println "✓" services "ids projected to" out
+                                           "— host + package need the" target "NDA console SDK (private repo)."))))}
+
   test       {:doc  "Golden-frame + suite under BOTH backends."
               :task (shell "scripts/test-script-backends.sh")}}}

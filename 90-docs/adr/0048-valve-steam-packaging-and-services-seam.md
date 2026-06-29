@@ -1,8 +1,9 @@
 # ADR-0048: Valve Steam Support — Desktop Packaging + a Steamworks Services Seam (CLJ-facing)
 
 **Date**: 2026-06-27
-**Status**: Proposed — Phase 1 (services seam + stub backend + desktop packaging predicate) implemented + tested
+**Status**: Proposed — Phases 1–3 implemented (services seam + stub backend + desktop packaging predicate; EDN catalog + `bb steam-lint`/`steam-config`; gated `steam-sdk` backend + `bb steam-package` depot). The `steamworks-rs` binding itself is in-repo but feature-gated and unvalidated (needs SDK + App ID + Steam client).
 **Author**: kami-engine team
+**Superseded-in-part-by**: ADR-0049 — the Steam-specific `kami:engine/steam` seam was generalized to the platform-neutral `kami:engine/services` (Steam is now one backend of five: + PSN / Switch / Game Center / Google Play). The packaging half (desktop depot) stands; the services half is subsumed by 0049.
 **Related**: ADR-0037 (cross-platform packaging — the OS host matrix this extends), ADR-0035 (`kami-engine-clj` Clojure→WASM), ADR-0040 (everything describable is EDN), `kami-script-runtime/src/platform.rs`, `wit/kami-game/world.wit`
 
 ---
@@ -110,10 +111,17 @@ Achievement and stat **ids** are authored as data alongside `scene.edn`, e.g. `s
  [{:id "bosses" :type :int :default 0}]}
 ```
 
-The guest only ever *names* these strings; the catalog is consumed by the `bb kami` packaging step
-(Clojure side) to generate the Steamworks config and validate that every `steam-unlock!`/`set-stat`
-id the game references exists in the catalog. (Catalog→VDF generation and the lint are follow-up
-packaging work; this ADR fixes the data shape.)
+The guest only ever *names* these strings; the catalog is consumed by the `bb` packaging step
+(Clojure side, `scripts/steam.clj`) to validate and project it:
+
+- **`bb steam-lint <game>`** parses `logic.clj` (it is EDN — kotoba-edn reads it), walks for the
+  three steam builtins, collects the string id each names, and **fails the build (exit 2)** if any
+  referenced id is absent from `steam.edn` (and notes declared-but-unused ids). This is the
+  author-time guard that a typo'd `(steam-unlock! "FRIST_WIN")` can't ship.
+- **`bb steam-config <game>`** projects `steam.edn` → `dist/steam/<game>/`: `steam_appid.txt`, a
+  SteamPipe `app_build_<appid>.vdf` (what `steamcmd +run_app_build` consumes), and a
+  `steam-schema.edn` manifest of the achievement/stat schema for partner-site setup (achievements
+  have no upload file — they're defined on the partner site).
 
 ---
 
@@ -176,11 +184,20 @@ used for the console GPU backend.
    `steam_queue` + `drain_steam_queue` + `steam::{SteamEvent, SteamBackend, StubSteam}`;
    `Target::steam_distributable`. Tests: clj compiles + imports the interface; runtime fills/drains
    the queue end-to-end; backend fan-out + stub-is-noop; platform predicate invariants.
-2. **EDN catalog tooling** — `bb kami` consumes `steam.edn` to generate Steamworks config and lint
-   that every referenced id exists (the ADR-0040 author-time guard).
-3. **`steam-sdk` backend** — `steamworks-rs` impl of `SteamBackend` behind the feature; `bb kami
-   package <os> --dist steam` lays out the depot + `steam_appid.txt`. Needs the SDK + an App ID, so
-   validated only on a real Steam build (the ADR-0037 console-seam pattern).
+2. ✅ **EDN catalog tooling** — `steam.edn` catalog (ADR-0040) + `scripts/steam.clj` driving
+   `bb steam-lint` (referenced ⊆ declared, fails on a missing id; verified green on `survivors`
+   and red on a crafted undeclared id) and `bb steam-config` (→ `steam_appid.txt` + SteamPipe VDF +
+   schema manifest). The reference game `survivors` now actually emits FIRST_BLOOD / CENTURION /
+   `kills` / `status` from `logic.clj`, and recompiles clean.
+3. ✅ **`steam-sdk` backend + depot packaging** (binding unvalidated) — `steam::default_backend()`
+   returns `StubSteam` by default and a `steamworks-rs`-backed `SteamworksSteam` under the
+   `steam-sdk` feature (off in CI; the player `kami-clj-play` drains the steam queue into it each
+   frame). `bb steam-package <game> [os]` lints, projects the catalog, builds the desktop release
+   host, and lays out the depot (binary + game data + `steam_appid.txt` + VDF); it links the real
+   SDK only when `KAMI_STEAM_SDK=1` (else the depot ships with `StubSteam`). The `steamworks-rs`
+   calls themselves need the SDK + App ID + Steam client, so — like the ADR-0037 console GPU
+   backend — they are **in-repo but unverified** until built on a real Steam machine; verify them
+   against the pinned `steamworks` crate version when enabling the feature.
 
 ---
 
