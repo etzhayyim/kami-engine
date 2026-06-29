@@ -1,0 +1,26 @@
+;; Platform-services catalog for KAMI Survivors (ADR-0049).
+;;
+;; Author-time data (ADR-0040). logic.clj names only the LOGICAL :key; this file
+;; maps each to every store's id format (Steam API name / PSN trophy int / Game
+;; Center reverse-DNS / Google Play "CgkI…" / Nintendo title id). `bb services-lint
+;; <game>` fails the build if logic.clj references a :key not declared here, and
+;; warns if a declared achievement is missing the id for a shipped store.
+;; `bb services-config <game> <store>` projects the right ids per store.
+{:services/app-id {:steam 480
+                   :psn "NPWR00001_00"
+                   :gamecenter "group.gftd.kami.survivors"
+                   :google "1234567890"
+                   :switch "0x0100000000000001"}
+
+ :services/achievements
+ [{:key "first_blood" :name "First Blood" :desc "Defeat your first enemy"
+   :steam "FIRST_BLOOD" :psn 1 :gamecenter "grp.first_blood" :google "CgkIfirstblood" :switch 1}
+  {:key "centurion"   :name "Centurion"   :desc "Defeat 100 enemies in one run"
+   :steam "CENTURION"  :psn 2 :gamecenter "grp.centurion"  :google "CgkIcenturion"  :switch 2}]
+
+ :services/stats
+ [{:key "kills" :type :int :default 0
+   :steam "kills" :psn 1 :gamecenter "grp.kills.leaderboard" :google "CgkIkills"}]
+
+ :services/rich-presence
+ [{:key "status"}]}
