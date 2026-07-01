@@ -111,6 +111,9 @@ members = [
     "kami-usd-native",
     # ADR-2605261800 Phase C: WASM cdylib demonstrator
     "kami-cartpole-wasm",
+    # ADR-2607011300: generalized IsaacWorld/Articulation wasm bridge (any URDF,
+    # not just Cartpole) for the kami-nv-compat TS->Rust migration
+    "kami-isaac-sim-wasm",
 ]
 
 [workspace.package]

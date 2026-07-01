@@ -1,0 +1,16 @@
+[package]
+name = "kami-isaac-sim-wasm"
+description = "kami-genesis IsaacWorld/Articulation/ArticulationController as a wasm-bindgen cdylib -- generalizes kami-cartpole-wasm (single fixed topology) to any URDF, backing @etzhayyim/kami-nv-compat/isaac-sim over the real Featherstone RNEA/CRBA engine instead of a from-scratch TS reimplementation. ADR-2605261800 / ADR-2607011300."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+kami-articulated = { path = "../kami-articulated" }
+kami-genesis = { path = "../kami-genesis" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
