@@ -152,7 +152,11 @@
    :nearest-tagged    :host-import/scene-nearest
    :move-toward       :host-import/scene-move-toward})
 
-(defn host-import [op]
+(defn host-import
+  "The `:host-import/*` keyword a builtin op `op` (e.g. `:spawn-entity`) maps
+  to, or nil if `op` is a pure guest builtin (e.g. `:add`) with no host
+  import."
+  [op]
   (get builtin->host-import op))
 
 ;; ---------------------------------------------------------------------------
