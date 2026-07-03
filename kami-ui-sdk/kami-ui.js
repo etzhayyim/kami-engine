@@ -502,6 +502,10 @@ function Button(opts) {
 }
 
 // ━━━ Slider ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// NOTE: Slider/ColorSwatch/Carousel also have a real ClojureScript port
+// (kotoba-lang/kami-ui-sdk's `kami-ui-sdk.widgets` namespace, ADR-2607031200
+// Phase 4) — prefer that for new CLJS consumers. This JS stays as-is for
+// existing callers.
 
 /**
  * Slider — labeled numeric slider (drag or click-to-set), thumb settles
