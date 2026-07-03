@@ -43,6 +43,7 @@
 
   A string handle in the guest is `(offset << 32) | len`. Host imports that
   take `:string-handle` params receive a `(ptr:i32, len:i32)` pair."
+  (:refer-clojure :exclude [compile])
   (:require [kotoba.engine-clj.ast :as ast]
             [kotoba.engine-clj.errors :as err]
             [kotoba.engine-clj.numerics :as num]))
