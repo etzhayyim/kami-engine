@@ -6,6 +6,7 @@
 node_modules
 /dist/
 .cpcache/
+.clj-kondo/.cache/
 /dance_*.png
 /dance.gif
 /vrm_mesh_test.png
