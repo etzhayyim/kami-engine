@@ -1,5 +1,6 @@
 (ns kami.mangaka.render-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing]]
             [kami.mangaka.render :as r]))
 
 (deftest aspect->dims-test
@@ -77,8 +78,8 @@
   (testing "the bundled mangaka_default_anchors.edn loads + provides generic keys"
     ;; a minimal work resource isn't on the test classpath, so merge directly
     ;; against the real defaults reader path via a tiny work map.
-    (let [defaults (#'r/read-edn-reader (clojure.java.io/reader
-                                         (clojure.java.io/resource r/default-anchors-resource)))]
+    (let [defaults (#'r/read-edn-reader (io/reader
+                                         (io/resource r/default-anchors-resource)))]
       (is (= "cagliostrolab/animagine-xl-4.0" (:model defaults)))
       (is (= 42 (:word-budget defaults)))
       (is (contains? (:aspect-by-layout defaults) "splash"))
