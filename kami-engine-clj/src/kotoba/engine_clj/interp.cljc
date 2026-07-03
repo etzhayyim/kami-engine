@@ -248,7 +248,7 @@
     (try
       (exec-seq instance locals body stack')
       (catch #?(:clj Throwable :cljs :default) e
-        (if-let [d (branch-depth e)]
+        (if-let [_d (branch-depth e)]
           (throw (ex-info "branch" (update (ex-data e) ::branch-depth dec)))
           (throw e))))))
 
