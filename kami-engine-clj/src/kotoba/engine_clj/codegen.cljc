@@ -73,6 +73,14 @@
     :do    (:body expr)
     :recur (:args expr)
     (:builtin :call) (:args expr)
+    ;; (set-atom! name value) lowers to {:node :atom-set :name … :value …}
+    ;; (ast.cljc) — value is a full nested expression (may itself call a
+    ;; host-import builtin, or contain a string literal) and must be scanned
+    ;; like any other child, or collect-host-imports/collect-literals silently
+    ;; skip it while codegen's emit step still tries to emit it, throwing
+    ;; "host import … not in import index" downstream (found via
+    ;; `(set-atom! player (spawn-entity "player"))`).
+    :atom-set [(:value expr)]
     []))
 
 ;; ---------------------------------------------------------------------------
