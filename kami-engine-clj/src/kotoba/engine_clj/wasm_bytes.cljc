@@ -38,12 +38,39 @@
 ;; LEB128 (WASM binary format §5.2.2 "Integers")
 ;; ---------------------------------------------------------------------------
 
+;; BUGFIX (found via network-isekai's real browser execution of a def-bound-fn
+;; string-handle reference, e.g. `(defn player [] (nearest-tagged "player" ...))`
+;; -- not by inspection): `bit-and`/`bit-shift-right`/`unsigned-bit-shift-right`
+;; compile to JS's native 32-bit bitwise operators under ClojureScript, which
+;; implicitly ToInt32/ToUint32-coerce their operand FIRST, silently discarding
+;; any bits above bit 31. `emit-str` (codegen.cljc) packs a 64-bit string handle
+;; as `(abs << 32) | len` -- once that packed value needs more than 32 bits
+;; (any real game, since `abs` includes the 1024-byte data-segment base), the
+;; original `n (bit-and n 0x7f)`/`n (bit-shift-right n 7)` here silently
+;; truncated it to its low 32 bits before ever looking at a single byte, so the
+;; *encoded* i64.const bytes represented the wrong (truncated) value -- correct
+;; on the JVM (`clojure -M:test`), where Clojure's bitwise ops operate on full
+;; 64-bit longs, which is why this never surfaced there. `shr7` below uses
+;; `mod`/`quot`/`-` (floored division, not JS bitwise truncation) to compute
+;; "arithmetic shift right by 7" correctly on both platforms for any magnitude
+;; within the double-safe-integer range (2^53) -- ample headroom for this
+;; compiler's actual i64.const payloads (packed string handles, atom inits,
+;; small literals). `b` itself is always in [0,127] after `mod`, so the
+;; existing `(bit-and b 0x40)`/`(bit-or b 0x80)` calls on `b` (not `n`) stay
+;; bitwise -- those were never the bug, `b` never exceeds 32-bit range.
+(defn- shr7
+  "Arithmetic shift-right-by-7, i.e. floor(n / 128) -- correct for negative n
+  too (floored, not truncated), via `mod`/`quot` instead of a bitwise shift."
+  [n]
+  (let [b (mod n 128)]
+    (quot (- n b) 128)))
+
 (defn uleb128
   "Unsigned LEB128 encoding of a non-negative integer `n` -> vector of bytes."
   [n]
   (loop [n (long n) out []]
-    (let [b (bit-and n 0x7f)
-          n (unsigned-bit-shift-right n 7)]
+    (let [b (mod n 128)
+          n (shr7 n)]
       (if (zero? n)
         (conj out b)
         (recur n (conj out (bit-or b 0x80)))))))
@@ -54,8 +81,8 @@
   (`s32`/`s64` are signed LEB128, unlike `u32` indices which use `uleb128`)."
   [n]
   (loop [n (long n) out []]
-    (let [b (bit-and n 0x7f)
-          n (bit-shift-right n 7)
+    (let [b (mod n 128)
+          n (shr7 n)
           done? (or (and (zero? n) (zero? (bit-and b 0x40)))
                     (and (= n -1) (not (zero? (bit-and b 0x40)))))]
       (if done?
