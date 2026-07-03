@@ -167,7 +167,17 @@
       (throw (err/codegen-error "string literal not found in data segment")))
     (let [abs (+ data-base off)
           len (count bs)
-          handle (bit-or (bit-shift-left abs 32) len)]
+          ;; BUGFIX (found via network-isekai's real browser execution, not by
+          ;; inspection): `bit-shift-left`/`bit-or` compile to JS's native `<<`/`|`
+          ;; under ClojureScript, which truncate to 32-bit ints per the JS spec --
+          ;; `(bit-shift-left abs 32)` silently becomes `abs << (32 mod 32)` =
+          ;; `abs << 0` = `abs` in the browser (works correctly on the JVM, where
+          ;; Clojure's bit-shift-left/bit-or operate on full 64-bit longs -- this
+          ;; is why `clojure -M:test` never caught it). `+`/`*` use full-precision
+          ;; arithmetic on both platforms (Long on JVM, double on JS, both exact
+          ;; for these magnitudes) and are mathematically identical to the
+          ;; bitwise form here since `len` never overlaps `abs`'s low 32 bits.
+          handle (+ (* abs 4294967296) len)]
       [[:i64-const handle]])))
 
 (defn- emit-if [env state cond-e then-e else-e]
