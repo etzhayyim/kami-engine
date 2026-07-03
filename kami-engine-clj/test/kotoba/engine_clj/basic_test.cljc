@@ -131,6 +131,24 @@
      (deftest entity-spawn-builtin-compiles
        (compiles-ok "(defn init [] (spawn-entity \"player\"))"))
 
+     ;; REGRESSION: (set-atom! name (spawn-entity …)) — a host-import call
+     ;; nested as set-atom!'s VALUE argument — used to throw "host import …
+     ;; not in import index" once a SECOND function elsewhere in the program
+     ;; also called a host-import builtin. Root cause: expr-children (used by
+     ;; both collect-host-imports and collect-literals) had no case for
+     ;; :atom-set (the AST node set-atom! lowers to, ast.cljc), so it never
+     ;; walked into :value — collect-host-imports silently missed the nested
+     ;; spawn-entity, but codegen's emit step still tried to emit it, and threw
+     ;; on the incomplete import-index. Fixed by adding an :atom-set case to
+     ;; expr-children returning [(:value expr)].
+     (deftest set-atom-with-nested-host-import-compiles
+       (let [ir (compiles-ok "(defatom player 0)
+                              (defn init [] (set-atom! player (spawn-entity \"player\")))
+                              (defsystem flow [dt] (get-x (atom-val player)) 0)")]
+         (is (= #{:host-import/scene-spawn :host-import/scene-get-x}
+                (into #{} (map :kind) (:host-imports ir)))
+             "both host imports (one nested inside set-atom!) must be collected")))
+
      (deftest key-down-builtin-compiles
        (compiles-ok "(defn tick [dt] (if (key-down? \"ArrowRight\") 1 0))"))
 
