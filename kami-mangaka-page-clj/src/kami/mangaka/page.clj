@@ -185,7 +185,7 @@
 
 (defn- nameplate!
   "キャラ名札 → 黒箱に白抜きゴシック, コマ左下 (HxH の従事兵ラベル)."
-  [g text x y w h]
+  [g text x y _w h]
   (when (and text (seq (str text)))
     (.setFont g (font Font/BOLD 20))
     (let [fm (.getFontMetrics g) pad 8
