@@ -1,6 +1,11 @@
 # ADR-0048 — Align character/scene pipeline with global interchange standards (GLB/glTF/USD/MaterialX), as pure kotoba-clj/wasm libraries, no Rust
 
-- Status: proposed
+- Status: accepted (all 5 decision items implemented and shipped 2026-07-05: `kotoba-lang/
+  org-khronos-glb` extracted; `org-khronos-gltf` gained a parser + chain retargeting;
+  `org-openusd` gained a real USDA parser; `org-materialx` gained real node-defs + a parser +
+  render-IR bridge; `kotoba-lang/character`/`kami-gen-hybrid` adopted the tagged-point
+  coordinate-space convention; `cloud-murakumo`/`kami-gen-ml3d` gained the `:autorig` UniRig
+  path. See "Naming correction" below for a post-ship repo rename.)
 - Date: 2026-07-05
 - Builds on: ADR-0031 (kami-vrm three-free topology), ADR-0039 (kototama/render-IR single entry),
   ADR-0043 (VRM dance scenes in CLJ/EDN), ADR-0044 (EDN render-IR three.js/VRM parity)
@@ -233,6 +238,22 @@ inside it rather than being thrown away.
    explicit direction for this ADR (no Rust dependency) and because it would require carving
    an exception into `kami-engine`'s own CI guard for one feature, undermining the guard's
    purpose.
+
+## Naming correction (2026-07-05, post-ship)
+
+`kotoba-lang/glb`, `kotoba-lang/gltf`, `kotoba-lang/usd`, `kotoba-lang/materialx` were renamed
+to `kotoba-lang/org-khronos-glb`, `kotoba-lang/org-khronos-gltf`, `kotoba-lang/org-openusd`,
+`kotoba-lang/org-materialx` respectively (GitHub rename, redirects preserved; `deps.edn`
+`:local/root` paths and `manifest/west.yml` pins updated in the same pass). Rationale: these 4
+repos implement external-standards-body formats (khronos.org, openusd.org, materialx.org), not
+this org's own invented concepts (unlike `character`/`mesher`/`skeleton`/`sdf`/`scad`, which
+keep their bare names) — a short generic name like `usd` risks future collision as a
+language-lib slug. Reverse-domain naming for the publishing body, following the same
+after-the-fact rename precedent already established in ADR-2607041500 (`com-` prefix pass over
+1,027 vendor-compat repos, which explicitly permits "anyone may correct an individual repo's
+name later — GitHub rename + path update"). Every mention of the old bare names in this ADR's
+body above is historical (describes what was decided/built under those names at the time);
+new references elsewhere in this org should use the `org-*` names.
 
 ## References
 
