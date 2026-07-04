@@ -2,6 +2,17 @@
 
 See also: `ARCHITECTURE.md` for ownership boundaries and authority rules across `kami-web`, `kami-engine-sdk`, and `kami-ui-sdk`.
 
+> **⚠ Staleness notice (2026-07-05, ADR-0048).** The crate table and Rust-prohibition
+> language below (29-crate Rust workspace, "JS/Clojure による Rust ロジック再実装禁止",
+> "独自レンダラ禁止 — kami-render wgpu PBR pipeline が唯一", `cargo test` commands) describe
+> this repo's **pre-migration** state. Verified as of ADR-0048: this repo has **zero**
+> `Cargo.toml`/`*.rs` files anywhere, `kami-render`/`kami-webgpu-rs` ship WGSL shaders only
+> (no Rust host code), and `.github/workflows/ci.yml` runs a "WIT single-source + no-rust
+> guard" job that fails the build on any Rust file. The former Rust crate logic was ported to
+> standalone `.cljc` repos under `kotoba-lang/*` (ADR-2607010930, `com-junkawasaki/root`). This
+> file needs a full rewrite to match; until then, treat the crate table/prohibitions below as
+> **historical**, and treat "no Rust dependency, kotoba-clj/wasm" (ADR-0048) as current policy.
+
 ## Architecture
 
 **wgpu 統一レンダラ (WebGPU → WebGL2 fallback, ~97% browser coverage) + Nintendo-style UI SDK。**
