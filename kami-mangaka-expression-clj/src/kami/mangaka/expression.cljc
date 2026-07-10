@@ -63,13 +63,39 @@
 
 (def default-patterns-resource "mangaka_expression_patterns.edn")
 
+;; mangaka_expression_patterns.edn was datomic/datascript-ized by
+;; edn-datomize.bb (wrap-map, ns="resources.mangaka-expression-patterns"):
+;; top level is now `[{:db/id -1 :resources.mangaka-expression-patterns/version
+;; ... :resources.mangaka-expression-patterns/archetypes "..." ...}]` tx-data,
+;; with non-scalar values (:vocab :archetypes :registers :expression-cues
+;; :intensity :observations) pr-str'd into blob string attrs. This
+;; reconstitutes the original raw {:version :context :source :vocab
+;; :archetypes :default-archetype :registers :default-register
+;; :expression-cues :intensity :observations} map so resolve-style /
+;; analyze-line / analyze-panel / analyze-page keep working unchanged.
+#?(:clj
+   (defn- unblob [v]
+     (if (string? v)
+       (try (let [parsed (edn/read-string v)] (if (coll? parsed) parsed v))
+            (catch Exception _ v))
+       v)))
+
+#?(:clj
+   (defn- reconstitute-patterns [content]
+     (if (and (vector? content) (seq content) (map? (first content)) (contains? (first content) :db/id))
+       (into {} (map (fn [[k v]]
+                       [(if (= "resources.mangaka-expression-patterns" (namespace k)) (keyword (name k)) k)
+                        (unblob v)]))
+             (dissoc (first content) :db/id))
+       content)))
+
 #?(:clj
    (defn load-patterns
      "Load the bundled pattern library from the classpath (or an override name)."
      ([] (load-patterns default-patterns-resource))
      ([resource]
       (with-open [r (io/reader (io/resource resource))]
-        (edn/read (java.io.PushbackReader. r))))))
+        (reconstitute-patterns (edn/read (java.io.PushbackReader. r)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Emotion → Expression (kami.mangaka.scene/expression-of と同表; scene は JVM の

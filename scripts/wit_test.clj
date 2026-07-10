@@ -9,7 +9,34 @@
          '[clojure.edn :as edn]
          '[clojure.string :as str])
 
-(def idl   (edn/read-string (slurp "wit/kami-interface.edn")))
+;; wit/kami-interface.edn was datomic/datascript-ized by edn-datomize.bb
+;; (wrap-map, ns="wit.kami-interface"): top level is now `[{:db/id -1
+;; :wit.kami-interface/package ... :wit.kami-interface/interfaces "..." ...}]`
+;; tx-data, with the nested :interfaces/:exports maps pr-str'd into blob string
+;; attrs. This reconstitutes the original raw {:package :world :interfaces
+;; :exports} map so every reader below keeps working unchanged.
+(defn- unblob [v]
+  (if (string? v)
+    (try (let [parsed (edn/read-string v)] (if (coll? parsed) parsed v))
+         (catch Exception _ v))
+    v))
+
+(defn- tx-data? [content]
+  (and (vector? content) (seq content) (map? (first content)) (contains? (first content) :db/id)))
+
+(defn- reconstitute-entity [ns-name tx-data]
+  (into {} (map (fn [[k v]]
+                  [(if (= ns-name (namespace k)) (keyword (name k)) k)
+                   (unblob v)]))
+        (dissoc (first tx-data) :db/id)))
+
+(defn read-idl [f]
+  (let [content (edn/read-string (slurp f))]
+    (if (tx-data? content)
+      (reconstitute-entity "wit.kami-interface" content)
+      content)))
+
+(def idl   (read-idl "wit/kami-interface.edn"))
 (def world (slurp "wit/kami-game/world.wit"))
 
 ;; ── semantic type → WASM ABI (the lowering the host/guest agree on) ──────────────────────

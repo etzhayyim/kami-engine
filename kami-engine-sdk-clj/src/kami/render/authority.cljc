@@ -52,12 +52,43 @@
      :pipeline/role :atlas-sprite
      :pipeline/adapter "kami_render::scene_pipelines::atlas"}]})
 
+;; kami/render/authority.edn was datomic/datascript-ized by edn-datomize.bb
+;; (wrap-map-keep-ns, ns="kami.render.authority"): top level is now
+;; `[{:db/id -1 :authority/id ... :render/pipelines "..." ...}]` tx-data.
+;; Every key here was already idiomatically namespaced (:authority/*,
+;; :render/*) so keep-ns left them unchanged; only :render/default-clear,
+;; :render/default-pass and :render/pipelines (non-scalar values) got
+;; pr-str'd into blob string attrs. This reconstitutes the original raw map
+;; so every reader below (and contract_test.cljc's direct equality check)
+;; keeps working unchanged.
+#?(:clj
+   (defn- unblob [v]
+     (if (string? v)
+       (try (let [parsed (edn/read-string v)] (if (coll? parsed) parsed v))
+            (catch Exception _ v))
+       v)))
+
+#?(:clj
+   (defn- tx-data? [content]
+     (and (vector? content) (seq content) (map? (first content)) (contains? (first content) :db/id))))
+
+#?(:clj
+   (defn- reconstitute-entity [ns-name tx-data]
+     (into {} (map (fn [[k v]]
+                     [(if (= ns-name (namespace k)) (keyword (name k)) k)
+                      (unblob v)]))
+           (dissoc (first tx-data) :db/id))))
+
 #?(:clj
    (defn- read-resource []
      (some-> "kami/render/authority.edn"
              io/resource
              slurp
-             edn/read-string)))
+             edn/read-string
+             (as-> content
+                   (if (tx-data? content)
+                     (reconstitute-entity "kami.render.authority" content)
+                     content)))))
 
 (def authority
   #?(:clj (or (read-resource) authority-edn)
