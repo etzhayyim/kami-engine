@@ -1,5 +1,7 @@
 # KAMI Engine Package Boundaries
 
+> **Note (ADR-2607102200 addendum 11):** nested `kami-ui-sdk` JS retired → `kami-engine-app-sdk` (CLJC) + `kami-web/vendor/kami-ui-sdk` (demo only).
+
 ## Scope
 
 Defines responsibility and authority boundaries across:
