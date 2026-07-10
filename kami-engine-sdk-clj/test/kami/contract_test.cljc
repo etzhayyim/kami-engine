@@ -101,12 +101,33 @@
 
 ;; --- render-IR --------------------------------------------------------------
 
+;; kami/render/authority.edn was datomic/datascript-ized by edn-datomize.bb
+;; (wrap-map-keep-ns, ns="kami.render.authority") — see authority.cljc's
+;; read-resource docstring. Reconstitute the raw map here too so this direct
+;; equality check against authority/authority-edn keeps passing unchanged.
+#?(:clj
+   (defn- test-unblob [v]
+     (if (string? v)
+       (try (let [parsed (edn/read-string v)] (if (coll? parsed) parsed v))
+            (catch Exception _ v))
+       v)))
+
+#?(:clj
+   (defn- test-reconstitute-authority [content]
+     (if (and (vector? content) (seq content) (map? (first content)) (contains? (first content) :db/id))
+       (into {} (map (fn [[k v]]
+                       [(if (= "kami.render.authority" (namespace k)) (keyword (name k)) k)
+                        (test-unblob v)]))
+             (dissoc (first content) :db/id))
+       content)))
+
 #?(:clj
    (deftest render-authority-edn
      (let [artifact (-> "kami/render/authority.edn"
                         io/resource
                         slurp
-                        edn/read-string)]
+                        edn/read-string
+                        test-reconstitute-authority)]
        (is (= artifact authority/authority))
        (is (= artifact authority/authority-edn))
        (is (authority/validate artifact))

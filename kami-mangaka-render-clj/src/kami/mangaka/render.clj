@@ -32,8 +32,30 @@
   base-negative / aspect-by-layout."
   "mangaka_default_anchors.edn")
 
+;; mangaka_default_anchors.edn was datomic/datascript-ized by edn-datomize.bb
+;; (wrap-map, ns="resources.mangaka-default-anchors"): top level is now
+;; `[{:db/id -1 :resources.mangaka-default-anchors/model ...
+;; :resources.mangaka-default-anchors/aspect-by-layout "..." ...}]` tx-data,
+;; with the non-scalar :aspect-by-layout value pr-str'd into a blob string
+;; attr. `read-edn-reader` is also used for arbitrary work anchor files (not
+;; datomized), so this reconstitution only fires when the parsed content is
+;; actually tx-data shaped — any other map/vector passes through unchanged.
+(defn- unblob [v]
+  (if (string? v)
+    (try (let [parsed (edn/read-string v)] (if (coll? parsed) parsed v))
+         (catch Exception _ v))
+    v))
+
+(defn- reconstitute-anchors [content]
+  (if (and (vector? content) (seq content) (map? (first content)) (contains? (first content) :db/id))
+    (into {} (map (fn [[k v]]
+                    [(if (= "resources.mangaka-default-anchors" (namespace k)) (keyword (name k)) k)
+                     (unblob v)]))
+          (dissoc (first content) :db/id))
+    content))
+
 (defn- read-edn-reader [rdr]
-  (with-open [r rdr] (edn/read (java.io.PushbackReader. r))))
+  (with-open [r rdr] (reconstitute-anchors (edn/read (java.io.PushbackReader. r)))))
 
 (defn merge-anchors
   "Merge generic mangaka defaults UNDER a work's anchors. Work wins at the top

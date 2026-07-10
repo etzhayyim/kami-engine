@@ -1,6 +1,35 @@
 (require '[clojure.edn :as edn])
 
-(def registry (edn/read-string (slurp "docs/adapter-registry.edn")))
+;; docs/adapter-registry.edn was datomic/datascript-ized by edn-datomize.bb
+;; (wrap-map-keep-ns, ns="docs.adapter-registry"): top level is now
+;; `[{:db/id -1 :kami.adapter.registry/version ... :kami.adapter.registry/policy
+;; "..." ...}]` tx-data. Every key here was already idiomatically namespaced
+;; (:kami.adapter.registry/*) so keep-ns left them unchanged; only :policy/
+;; :contracts (nested maps/vectors) got pr-str'd into blob string attrs. This
+;; reconstitutes the original raw map so every lookup below keeps working
+;; unchanged.
+(defn- unblob [v]
+  (if (string? v)
+    (try (let [parsed (edn/read-string v)] (if (coll? parsed) parsed v))
+         (catch Exception _ v))
+    v))
+
+(defn- tx-data? [content]
+  (and (vector? content) (seq content) (map? (first content)) (contains? (first content) :db/id)))
+
+(defn- reconstitute-entity [ns-name tx-data]
+  (into {} (map (fn [[k v]]
+                  [(if (= ns-name (namespace k)) (keyword (name k)) k)
+                   (unblob v)]))
+        (dissoc (first tx-data) :db/id)))
+
+(defn read-registry [f]
+  (let [content (edn/read-string (slurp f))]
+    (if (tx-data? content)
+      (reconstitute-entity "docs.adapter-registry" content)
+      content)))
+
+(def registry (read-registry "docs/adapter-registry.edn"))
 
 (defn fail! [message data]
   (binding [*out* *err*]
