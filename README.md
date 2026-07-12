@@ -1,5 +1,10 @@
 # kami-engine
 
+`kami-physics` integrates the shared Kotoba physics scene contract with
+realtime rigid bodies, vehicle reduced-order models and high-fidelity CAE.
+Game and spatial-authoring callers use one CLJC router while fidelity remains
+explicit and fail-closed.
+
 > **Note (ADR-2607102200 addendum 11):** nested `kami-ui-sdk` JS retired → `kami-engine-app-sdk` (CLJC) + `kami-web/vendor/kami-ui-sdk` (demo only).
 
 `kami-engine` is now a Kotoba/CLJ/EDN/WIT asset and contract repository for the
