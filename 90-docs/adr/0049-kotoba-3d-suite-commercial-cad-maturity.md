@@ -186,9 +186,26 @@ before stable identity and deterministic projections exist.
 
 No aggregate “commercial CAD 5/5” claim is permitted by averaging. Each domain reports its
 own level, and the suite's commercial-CAD level is the **minimum** of the seven domain levels.
-The current exact-CAD/assembly/drawing/CAE/large-scene/collaboration programme therefore starts
-at **1/5 (architecture accepted)**; the existing polygon modifier stack is separately at
-**3/5** and the shipped browser polygon-modeler scope remains **5/5**.
+The programme started at **1/5 (architecture accepted)**. The implementation
+ledger below supersedes that historical baseline; a level changes only when its
+evidence is committed and repeatable.
+
+## Implementation ledger (2026-07-12)
+
+| Domain | Level | Committed evidence | Gate still required for 5/5 |
+|---|---:|---|---|
+| NURBS/B-rep/STEP/PMI | 4/5 | Rational NURBS and trimming; stable closed B-rep and healing diagnostics; 100 generated round trips; checked NIST AP203 fixture; external NIST FTC-11 AP242-e2 audit imports 72 vertices, 104 edges, 42 faces plus 6 dimensions, 4 tolerances, 2 datums and one datum system | Checked multi-vendor 100-file AP242 corpus, re-export comparison, units/product/assembly retention and exact-kernel Boolean/healing coverage |
+| Assemblies | 4/5 | Deterministic mates and conflict/DOF diagnostics; configurations; nested stable paths; revolute/prismatic joints, limits and gear/rack coupling; interference and mass properties; 1,000-occurrence data gate | General rotational/closed-loop mate solving, stable-identity exchange round trip and interactive public reference assembly |
+| Manufacturing drawings | 4/5 | Associative revision/stale/orphan diagnostics; section/detail views; classified hidden lines; semantic dimensions/GD&T/BOM; deterministic SVG, DXF and vector PDF | Curved-body HLR, auxiliary/exploded views, golden ISO/ASME template corpus and parameter-to-dimension regeneration E2E |
+| CAE | 4/5 | Solver-neutral revision/provenance graph; 1D bar, 2D truss, 3D tetrahedral static FEM; thermal and modal; analytic, reaction/energy, patch and convergence tests | Independent established-solver comparison corpus, contact/mesh-control adapter and published qualification manifest |
+| Modifier/dependency DAG | 5/5 | Typed DAG, 25 production modifiers, deterministic cache/invalidation, reorder/disable, structured failure with last-valid preview, persistence/history tests and public modeler integration | Maintain compatibility gates; no known critical gap in declared scope |
+| Very large scenes | 4/5 | Shared uploads/instancing, BVH/frustum/LOD/chunks/stream plans/stable picking; 1M occurrence and 600M streamed-triangle data gate; public WebGPU gate at 20k visible instances and 11.2M resident triangles | Named-device first-frame/fps/stall/memory matrix, occlusion/progressive LOD and equivalent WebGL2 fallback provenance gate |
+| Collaboration/history | 5/5 | Deterministic semantic replay/merge/revert/checkpoints; 10k operation snapshot gate; offline/out-of-order/fault convergence; RBAC/audit; real Ed25519 rotation/revocation/tamper tests; network-isekai transport integration | Maintain protocol/version compatibility; production key custody remains an explicit deployment adapter boundary |
+
+The suite-wide commercial-CAD maturity is therefore **4/5**, because the
+aggregate is the minimum and five domains still have mandatory 5/5 evidence.
+Modifier/DAG and collaboration are 5/5 only in the bounded scopes stated here;
+this ADR does not imply safety certification or universal STEP conformance.
 
 ## Integration and ownership
 
@@ -226,4 +243,3 @@ at **1/5 (architecture accepted)**; the existing polygon modifier stack is separ
    invalidation, and makes model-to-game/world use lossy.
 4. **Claim parity after UI demos.** Rejected: interoperability, numerical validation, large
    data and multi-user fault tests are mandatory parts of maturity.
-
