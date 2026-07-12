@@ -23,12 +23,16 @@ here.
   surfaces.
 - `kami-web/`, `kami-web-modelb/`, and shader/data assets remain as web-facing
   non-Rust fixtures.
+- `fixtures/scenes/kami-modeler-space.edn` and `bb suite-3d-check` define the
+  modeler → engine scene → game/world contract. The commercial CAD/CAE maturity
+  programme is specified by [ADR-0049](90-docs/adr/0049-kotoba-3d-suite-commercial-cad-maturity.md).
 
 ## Verify
 
 ```bash
 bb wit-check
 bb adapter-check
+bb suite-3d-check
 bb test
 ```
 
