@@ -55,6 +55,35 @@ per-demo `run_with_*` entries are legacy.
 | **kami-engine-sdk-clj** | brain (Model A) | Clojure/CLJS SDK: Datomic/datalevin source of truth → ECS → render-IR. |
 | **kami-clj-host** | brain GPU bridge | Decodes the render-IR → `kami-render` (for the Model-A SDK). |
 
+### Browser host physics: physics-2d wired through kotoba.physics.contract (2607121600)
+
+Per the staleness notice at the top of this file, the live browser host for
+compiled kami games is `kotoba-lang/host`'s `kami.host`/`kotoba.host` (the
+CLJS twin of the `kami-script-runtime` binding surface below — same
+`kami:engine/*` ABI vocabulary: scene/random/physics/input/render/audio/time).
+Its `kami:engine/physics@1.0.0` import (`apply-impulse`) has always been a
+no-op stub; real per-frame physics now runs as a separate ECS system
+(`kami.host/attach-rigid-body!` + `step-rigid-bodies!`, `com-junkawasaki/root`
+ADR-2607121600) that projects tagged entities into the shared
+`kotoba.physics.contract` scene envelope (`kotoba-lang/physics`) and steps
+them through `kotoba-lang/physics-2d`'s realtime rigid-body backend (AABB +
+circle colliders, impulse resolution + positional correction), writing
+positions/velocities back onto the ECS — mirroring the existing ad-hoc
+`:platformer` gravity/collision path but going through the portable contract
+instead of a bespoke loop. `network-isekai` (the reference consumer of
+`kotoba-lang/host`) forwards a `:rigid-body-2d` scene key the same way it
+already forwards `:platformer`. Complements this repo's own `kami-physics/`
+package (#100, `kami.physics.runtime` — a backend-id router over
+`{rigid-2d, vehicle, cae}` for callers that pick a fidelity/backend at
+runtime, e.g. tools/pipelines): that router has no ECS of its own, so
+`kami.host`'s rigid-body-2d system talks to `physics-2d.backend` directly
+rather than through the router, to avoid pulling the vehicle/CAE backends
+into a browser game bundle that only ever needs `:realtime`
+`:rigid-body-2d`. See `docs/adapter-registry.edn`'s `:scene-data` contract
+(`:physics` under `:adapters [:render :physics
+:robotics :simulation]`) for the standing registration of `physics` as a
+kami-engine adapter surface.
+
 ### Two runtime models (ADR-0038 §2)
 
 - **Model A — brain-on-host** (`kami-engine-sdk-clj` + `kami-clj-host`): the sim loop runs in
