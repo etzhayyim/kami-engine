@@ -55,7 +55,7 @@ per-demo `run_with_*` entries are legacy.
 | **kami-engine-sdk-clj** | brain (Model A) | Clojure/CLJS SDK: Datomic/datalevin source of truth → ECS → render-IR. |
 | **kami-clj-host** | brain GPU bridge | Decodes the render-IR → `kami-render` (for the Model-A SDK). |
 
-### Browser host physics: physics-2d wired through kotoba.physics.contract (2607121600)
+### Browser host physics: physics-2d wired through kotoba.physics.contract (2607122200)
 
 Per the staleness notice at the top of this file, the live browser host for
 compiled kami games is `kotoba-lang/host`'s `kami.host`/`kotoba.host` (the
@@ -64,7 +64,7 @@ CLJS twin of the `kami-script-runtime` binding surface below — same
 Its `kami:engine/physics@1.0.0` import (`apply-impulse`) has always been a
 no-op stub; real per-frame physics now runs as a separate ECS system
 (`kami.host/attach-rigid-body!` + `step-rigid-bodies!`, `com-junkawasaki/root`
-ADR-2607121600) that projects tagged entities into the shared
+ADR-2607122200) that projects tagged entities into the shared
 `kotoba.physics.contract` scene envelope (`kotoba-lang/physics`) and steps
 them through `kotoba-lang/physics-2d`'s realtime rigid-body backend (AABB +
 circle colliders, impulse resolution + positional correction), writing
