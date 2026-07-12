@@ -15,10 +15,15 @@
   {:doc "Gate: adapter registry is explicit and Rust-free."
    :task (load-file "scripts/check_adapter_registry.clj")}
 
+  suite-3d-check
+  {:doc "Gate: Modeler EDN is a valid WebGPU-first game/world space contract."
+   :task (load-file "scripts/check_3d_suite_contract.clj")}
+
   test
   {:doc "Run Rust-free repository gates."
    :task (do
            (shell "bb" "wit-check")
            (shell "bb" "adapter-check")
+           (shell "bb" "suite-3d-check")
            (shell "bash" "-lc"
                   "if find . \\( -name Cargo.toml -o -name Cargo.lock -o -name '*.rs' -o -name 'rust-toolchain*' -o -path './.cargo/*' \\) -print -quit | grep -q .; then find . \\( -name Cargo.toml -o -name Cargo.lock -o -name '*.rs' -o -name 'rust-toolchain*' -o -path './.cargo/*' \\) -print; exit 1; fi"))}}}

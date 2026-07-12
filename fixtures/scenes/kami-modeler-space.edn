@@ -1,0 +1,22 @@
+{:kami/document :modeler-project
+ :kami/version 2
+ :project/id "engine-space-fixture"
+ :project/name "Engine Space Fixture"
+ :project/scene
+ {:scene/objects
+  [{:object/id 1
+    :object/name "Playable Platform"
+    :object/mesh {:mesh/vertices [[-2 0 -2] [2 0 -2] [2 0 2] [-2 0 2]
+                                  [-2 0.25 -2] [2 0.25 -2] [2 0.25 2] [-2 0.25 2]]
+                  :mesh/faces [[0 3 2 1] [4 5 6 7] [0 1 5 4]
+                               [3 7 6 2] [0 4 7 3] [1 2 6 5]]}
+    :object/modifiers [] :object/parent nil
+    :object/translation [0 0 0] :object/rotation [0 0 0] :object/scale [1 1 1]
+    :object/visible? true :object/locked? false
+    :object/material {:material/base-color [0.25 0.55 0.9 1]
+                      :material/metallic 0 :material/roughness 0.65}}]}
+ :project/selection {:object-id 1 :face-id 1 :mode :object}
+ :project/camera {:azimuth 0.7 :elevation 0.45}
+ :project/interaction {:profile :blender :snap 0.25 :transform-axis :z}
+ :space/runtime {:renderer/primary :webgpu :renderer/fallback :webgl2
+                 :space/roles #{:game-level :world-building :asset-preview}}}
