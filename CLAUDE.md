@@ -72,8 +72,15 @@ positions/velocities back onto the ECS — mirroring the existing ad-hoc
 `:platformer` gravity/collision path but going through the portable contract
 instead of a bespoke loop. `network-isekai` (the reference consumer of
 `kotoba-lang/host`) forwards a `:rigid-body-2d` scene key the same way it
-already forwards `:platformer`. See `docs/adapter-registry.edn`'s
-`:scene-data` contract (`:physics` under `:adapters [:render :physics
+already forwards `:platformer`. Complements this repo's own `kami-physics/`
+package (#100, `kami.physics.runtime` — a backend-id router over
+`{rigid-2d, vehicle, cae}` for callers that pick a fidelity/backend at
+runtime, e.g. tools/pipelines): that router has no ECS of its own, so
+`kami.host`'s rigid-body-2d system talks to `physics-2d.backend` directly
+rather than through the router, to avoid pulling the vehicle/CAE backends
+into a browser game bundle that only ever needs `:realtime`
+`:rigid-body-2d`. See `docs/adapter-registry.edn`'s `:scene-data` contract
+(`:physics` under `:adapters [:render :physics
 :robotics :simulation]`) for the standing registration of `physics` as a
 kami-engine adapter surface.
 
