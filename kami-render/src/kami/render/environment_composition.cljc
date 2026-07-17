@@ -10,7 +10,8 @@
   {:safe-screen-bounds {:min [0.04 0.04] :max [0.96 0.96]}
    :ground-contact-screen-y-range [0.38 0.92]
    :subject-padding 0.035 :ground-contact-tolerance 0.025
-   :maximum-selected 8 :required-composition-regions #{}})
+   :maximum-selected 8 :required-composition-regions #{}
+   :required-composition-region-counts {}})
 
 (defn- radians [degrees] (* degrees (/ #?(:clj Math/PI :cljs js/Math.PI) 180.0)))
 (defn- v- [a b] (mapv - a b))
@@ -106,7 +107,12 @@
                       contact (ground-contact bounds)
                       contact-screen (project-point camera contact)
                       contact-screen-y (some-> contact-screen :screen second)
-                      ground-band (:ground-contact-screen-y-range policy)
+                      ground-band (or (:ground-contact-screen-y-range candidate)
+                                      (:ground-contact-screen-y-range policy))
+                      screen-extent (when screen
+                                      (max (- (get-in screen [:max 0]) (get-in screen [:min 0]))
+                                           (- (get-in screen [:max 1]) (get-in screen [:min 1]))))
+                      extent-range (:screen-extent-range candidate)
                       ground-error (#?(:clj Math/abs :cljs js/Math.abs) (- (second contact) ground-y))
                       screen-side (:screen-side candidate)
                       side-valid? (case screen-side
@@ -122,6 +128,10 @@
                                 (conj :outside-safe-screen)
                                 (and screen (intersects? screen subject-screen))
                                 (conj :subject-exclusion)
+                                (and screen-extent extent-range
+                                     (not (<= (first extent-range) screen-extent
+                                              (second extent-range))))
+                                (conj :screen-extent-outside-range)
                                 (not side-valid?) (conj :screen-side-mismatch)
                                 (> ground-error (:ground-contact-tolerance policy))
                                 (conj :not-grounded)
@@ -138,15 +148,21 @@
                                 (conj :ground-contact-outside-visible-ground-band))]
                   {:id id :candidate candidate :composition-region (:composition-region candidate)
                    :screen-side screen-side
-                   :screen-bounds screen
+                   :screen-bounds screen :screen-extent screen-extent
+                   :ground-contact-screen-y-range ground-band
+                   :screen-extent-range extent-range
                    :ground-contact {:world contact :projection contact-screen :error ground-error}
                    :accepted? (empty? reasons) :reasons reasons}))
               ordered)
         eligible (vec (filter :accepted? evaluated))
-        required-regions (vec (sort-by pr-str (:required-composition-regions policy)))
-        reserved (vec (keep (fn [region]
-                              (first (filter #(= region (:composition-region %)) eligible)))
-                            required-regions))
+        required-counts (merge-with max
+                                    (zipmap (:required-composition-regions policy) (repeat 1))
+                                    (:required-composition-region-counts policy))
+        required-regions (vec (sort-by pr-str (keys required-counts)))
+        reserved (vec (mapcat (fn [region]
+                                (take (get required-counts region)
+                                      (filter #(= region (:composition-region %)) eligible)))
+                              required-regions))
         reserved-ids (set (map :id reserved))
         fillers (remove #(contains? reserved-ids (:id %)) eligible)
         selected (vec (take (:maximum-selected policy) (concat reserved fillers)))
@@ -154,7 +170,12 @@
         rejected (vec (remove :accepted? evaluated))
         unselected-safe (vec (remove #(contains? selected-ids (:id %)) eligible))
         region-counts (frequencies (keep :composition-region selected))
-        missing-regions (vec (remove #(pos? (get region-counts % 0)) required-regions))
+        region-shortages (into (sorted-map)
+                               (keep (fn [[region required]]
+                                       (let [missing (- required (get region-counts region 0))]
+                                         (when (pos? missing) [region missing]))))
+                               required-counts)
+        missing-regions (vec (keys region-shortages))
         evidence {:valid? (and (boolean (seq selected)) (empty? missing-regions))
                   :candidate-count (count candidates)
                   :selected-count (count selected)
@@ -167,9 +188,15 @@
                   (into {} (map (fn [entry]
                                   [(:id entry) (get-in entry [:ground-contact :projection :screen 1])])
                                 selected))
+                  :selected-ground-contact-screen-y-ranges
+                  (into {} (map (juxt :id :ground-contact-screen-y-range) selected))
+                  :selected-screen-extents
+                  (into {} (map (juxt :id :screen-extent) selected))
                   :required-composition-regions required-regions
+                  :required-composition-region-counts required-counts
                   :selected-region-counts region-counts
                   :missing-composition-regions missing-regions
+                  :composition-region-shortages region-shortages
                   :subject-exclusion subject-screen :ground-y ground-y
                   :deterministic-order (mapv :id evaluated)
                   :world-context-retained? true}]
@@ -177,8 +204,12 @@
       (throw (ex-info "Environment composition failed closed: unsafe or missing required regions"
                       {:contract contract :evidence evidence :evaluated evaluated})))
     {:contract contract :family family :camera-contract character-camera/contract
-     :placements (mapv #(select-keys % [:id :candidate :screen-bounds :ground-contact]) selected)
-     :rejected (mapv #(select-keys % [:id :reasons :screen-bounds :ground-contact])
+     :placements (mapv #(select-keys % [:id :candidate :screen-bounds :screen-extent
+                                        :ground-contact-screen-y-range :screen-extent-range
+                                        :ground-contact]) selected)
+     :rejected (mapv #(select-keys % [:id :reasons :screen-bounds :screen-extent
+                                      :ground-contact-screen-y-range :screen-extent-range
+                                      :ground-contact])
                      rejected)
      :unselected-safe (mapv :id unselected-safe)
      :render-selection {:world {:mode :preserve-all :removed? false}
