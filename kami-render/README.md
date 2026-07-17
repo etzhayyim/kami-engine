@@ -272,6 +272,45 @@ selection is always `:preserve-all`, so framing never erases the environment.
 Stylized is implemented; photoreal reserves the same API and remains explicit
 future work.
 
+### Camera-safe environment composition
+
+`kami.render.environment-composition/compose` projects all eight corners of
+each candidate world AABB through a resolved production character camera. It
+selects only props contained by normalized safe-screen bounds, outside a padded
+subject projection, grounded within tolerance, and with a visible projected
+ground-contact point inside the production lower-frame band (default normalized
+screen Y `0.38–0.92`). Public `project-point` and `project-aabb` functions expose
+the identical projection contract to renderer and Studio tooling.
+
+Candidate order is deterministic by descending priority then semantic id. The
+result includes selected placements, rejected candidates with reasons, projected
+bounds, ground-contact evidence, the subject exclusion rectangle, and the exact
+ordering used. Evidence includes the configured ground band and every selected
+contact Y; sky/horizon contacts reject as
+`:ground-contact-outside-visible-ground-band`. No valid candidate produces an evidence-bearing fail-closed
+exception. Composition copies the camera's skinned subject selection but fixes
+world selection to `:preserve-all`; it cannot turn environment composition into
+a subject-only render. Stylized is implemented while photoreal retains the same
+future API boundary and rejects until implemented.
+
+Candidates may declare a `:composition-region`. When policy supplies
+`:required-composition-regions`, selection deterministically reserves one safe
+candidate per required region before filling remaining capacity by priority.
+Evidence reports selected region counts and missing regions; missing coverage
+fails closed, preventing a dense left or right candidate set from starving the
+opposite foreground slot.
+
+Optional candidate `:screen-side :left|:right` is verified against the projected
+padded subject exclusion: left candidates must end before the subject's left
+edge and right candidates must begin after its right edge. A semantic label that
+does not match projection rejects as `:screen-side-mismatch` before region slot
+reservation, preventing index/parity labels from spoofing composition balance.
+
+Evidence separates unsafe `:rejected-count` from safe candidates omitted only
+by `:maximum-selected` as `:unselected-safe-count` and `:unselected-safe` ids.
+Thus selected, rejected, and safe-truncated counts exactly partition the input
+candidate count without labeling capacity overflow as a geometry failure.
+
 Enabled equipment includes the adjusted transform plus its original mesh intent
 and attachment semantic, so a consumer applies the result without duplicating
 KAMI offsets. Entity-stable micro-variation is applied only inside validated
