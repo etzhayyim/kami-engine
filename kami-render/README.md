@@ -300,6 +300,17 @@ Evidence reports selected region counts and missing regions; missing coverage
 fails closed, preventing a dense left or right candidate set from starving the
 opposite foreground slot.
 
+Optional candidate `:screen-side :left|:right` is verified against the projected
+padded subject exclusion: left candidates must end before the subject's left
+edge and right candidates must begin after its right edge. A semantic label that
+does not match projection rejects as `:screen-side-mismatch` before region slot
+reservation, preventing index/parity labels from spoofing composition balance.
+
+Evidence separates unsafe `:rejected-count` from safe candidates omitted only
+by `:maximum-selected` as `:unselected-safe-count` and `:unselected-safe` ids.
+Thus selected, rejected, and safe-truncated counts exactly partition the input
+candidate count without labeling capacity overflow as a geometry failure.
+
 Enabled equipment includes the adjusted transform plus its original mesh intent
 and attachment semantic, so a consumer applies the result without duplicating
 KAMI offsets. Entity-stable micro-variation is applied only inside validated

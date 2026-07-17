@@ -107,3 +107,47 @@
                   (catch #?(:clj Exception :cljs js/Error) error error))]
     (is (= [:foreground-right]
            (get-in (ex-data failure) [:evidence :missing-composition-regions])))))
+
+(deftest evidence-separates-unsafe-rejections-from-safe-capacity-truncation
+  (let [candidates [{:id :prop/a :priority 3
+                     :bounds {:min [2.0 0.0 -0.2] :max [2.25 0.6 0.2]}}
+                    {:id :prop/b :priority 2
+                     :bounds {:min [2.4 0.0 -0.2] :max [2.65 0.6 0.2]}}
+                    {:id :prop/c :priority 1
+                     :bounds {:min [-2.5 0.0 -0.2] :max [-2.2 0.6 0.2]}}
+                    {:id :prop/unsafe-mask :priority 99
+                     :bounds {:min [-0.2 0.0 0.1] :max [0.2 0.8 0.35]}}]
+        result (composition/compose
+                {:resolved-camera resolved :subject-bounds subject :candidates candidates
+                 :policy {:maximum-selected 1}})
+        evidence (:evidence result)]
+    (is (= 1 (:selected-count evidence) (count (:placements result))))
+    (is (= 1 (:rejected-count evidence) (count (:rejected result))))
+    (is (= 2 (:unselected-safe-count evidence) (count (:unselected-safe result))))
+    (is (= (set (:unselected-safe result)) (set (:unselected-safe evidence))))
+    (is (= (:candidate-count evidence)
+           (+ (:selected-count evidence) (:rejected-count evidence)
+              (:unselected-safe-count evidence))))))
+
+(deftest semantic-screen-side-must-match-actual-projection
+  (let [right-bounds {:min [2.1 0.0 -0.2] :max [2.6 0.7 0.25]}
+        failure (try
+                  (composition/compose
+                   {:resolved-camera resolved :subject-bounds subject
+                    :candidates [{:id :prop/spoofed-left :screen-side :left
+                                  :composition-region :foreground-left
+                                  :bounds right-bounds}]
+                    :policy {:required-composition-regions #{:foreground-left}}})
+                  nil
+                  (catch #?(:clj Exception :cljs js/Error) error error))]
+    (is (= [:screen-side-mismatch]
+           (get-in (ex-data failure) [:evaluated 0 :reasons])))
+    (is (= [:foreground-left]
+           (get-in (ex-data failure) [:evidence :missing-composition-regions]))))
+  (let [valid (composition/compose
+               {:resolved-camera resolved :subject-bounds subject
+                :candidates [{:id :prop/right :screen-side :right
+                              :composition-region :foreground-right
+                              :bounds {:min [2.1 0.0 -0.2] :max [2.6 0.7 0.25]}}]
+                :policy {:required-composition-regions #{:foreground-right}}})]
+    (is (= [:prop/right] (mapv :id (:placements valid))))))

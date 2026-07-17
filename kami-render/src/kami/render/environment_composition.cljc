@@ -108,12 +108,21 @@
                       contact-screen-y (some-> contact-screen :screen second)
                       ground-band (:ground-contact-screen-y-range policy)
                       ground-error (#?(:clj Math/abs :cljs js/Math.abs) (- (second contact) ground-y))
+                      screen-side (:screen-side candidate)
+                      side-valid? (case screen-side
+                                    nil true
+                                    :left (and screen (<= (get-in screen [:max 0])
+                                                           (get-in subject-screen [:min 0])))
+                                    :right (and screen (>= (get-in screen [:min 0])
+                                                            (get-in subject-screen [:max 0])))
+                                    false)
                       reasons (cond-> []
                                 (nil? screen) (conj :behind-camera)
                                 (and screen (not (within? screen (:safe-screen-bounds policy))))
                                 (conj :outside-safe-screen)
                                 (and screen (intersects? screen subject-screen))
                                 (conj :subject-exclusion)
+                                (not side-valid?) (conj :screen-side-mismatch)
                                 (> ground-error (:ground-contact-tolerance policy))
                                 (conj :not-grounded)
                                 (or (nil? contact-screen)
@@ -128,6 +137,7 @@
                                               (second ground-band))))
                                 (conj :ground-contact-outside-visible-ground-band))]
                   {:id id :candidate candidate :composition-region (:composition-region candidate)
+                   :screen-side screen-side
                    :screen-bounds screen
                    :ground-contact {:world contact :projection contact-screen :error ground-error}
                    :accepted? (empty? reasons) :reasons reasons}))
@@ -140,12 +150,17 @@
         reserved-ids (set (map :id reserved))
         fillers (remove #(contains? reserved-ids (:id %)) eligible)
         selected (vec (take (:maximum-selected policy) (concat reserved fillers)))
+        selected-ids (set (map :id selected))
+        rejected (vec (remove :accepted? evaluated))
+        unselected-safe (vec (remove #(contains? selected-ids (:id %)) eligible))
         region-counts (frequencies (keep :composition-region selected))
         missing-regions (vec (remove #(pos? (get region-counts % 0)) required-regions))
         evidence {:valid? (and (boolean (seq selected)) (empty? missing-regions))
                   :candidate-count (count candidates)
                   :selected-count (count selected)
-                  :rejected-count (- (count candidates) (count selected))
+                  :rejected-count (count rejected)
+                  :unselected-safe-count (count unselected-safe)
+                  :unselected-safe (mapv :id unselected-safe)
                   :safe-screen-bounds (:safe-screen-bounds policy)
                   :ground-contact-screen-y-range (:ground-contact-screen-y-range policy)
                   :selected-ground-contact-screen-y
@@ -164,7 +179,8 @@
     {:contract contract :family family :camera-contract character-camera/contract
      :placements (mapv #(select-keys % [:id :candidate :screen-bounds :ground-contact]) selected)
      :rejected (mapv #(select-keys % [:id :reasons :screen-bounds :ground-contact])
-                     (remove :accepted? evaluated))
+                     rejected)
+     :unselected-safe (mapv :id unselected-safe)
      :render-selection {:world {:mode :preserve-all :removed? false}
                         :skinned (get-in resolved-camera [:render-selection :skinned])}
      :evidence evidence}))
