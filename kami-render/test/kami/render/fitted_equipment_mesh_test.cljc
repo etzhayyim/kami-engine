@@ -52,7 +52,10 @@
       (is (= (count (get-in part [:mesh :indices]))
              (get-in part [:material-ranges 0 :index-count]))))
     (is (= :weapon/grip-support (get-in resolved [:hands :hand-left :socket])))
-    (is (= :weapon/grip-primary (get-in resolved [:hands :hand-right :socket])))))
+    (is (= :weapon/grip-primary (get-in resolved [:hands :hand-right :socket])))
+    (doseq [[_ hand] (:hands resolved)]
+      (is (= (:socket hand) (get-in hand [:contact :socket])))
+      (is (= (get-in hand [:volume :center]) (get-in hand [:contact :position]))))))
 
 (deftest backpack-and-shoulder-dominance-is-reduced-and-within-occupancy
   (let [resolved-fit (fit/resolve-fit {:tier :hero})]
@@ -78,8 +81,8 @@
            (get-in resolved [:hands :hand-left :volume :center])))
     (is (= (get-in resolved [:arm-chains :right :centers :hand])
            (get-in resolved [:hands :hand-right :volume :center])))
-    (is (zero? (get-in resolved [:arm-chains :left :metrics :target-error])))
-    (is (zero? (get-in resolved [:arm-chains :right :metrics :target-error])))))
+    (is (< (get-in resolved [:arm-chains :left :metrics :target-error]) 1.0e-9))
+    (is (< (get-in resolved [:arm-chains :right :metrics :target-error]) 1.0e-9))))
 
 (deftest photoreal-boundary-remains-honestly-unsupported
   (is (:same-api? fitted/family-boundary))

@@ -118,7 +118,7 @@
 
    :equipment/weapon-primary
    {:part/id :equipment/weapon-primary :mesh-semantic :character.weapon/stylized-rifle
-    :mesh-contract :kotoba.render/weapon-mesh-v1
+    :mesh-contract :kotoba.render/weapon-mesh-v2
     :attachment {:semantic-id :humanoid/right-hand :socket :weapon/grip-primary :mode :rigid
                  :local-transform {:position [0.0 0.0 0.0]
                                    :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}}

@@ -87,9 +87,11 @@
         raw (combine [(sphere policy [0.16 0.19 0.13] [0.0 0.0 0.0])
                       (capsule policy 0.035 0.10 [(* sign -0.075) 0.0 -0.015])])
         volume {:center center :half [0.095 0.115 0.08]}]
-    {:mesh (fit-to-volume raw volume) :volume (assoc volume :kind :aabb)
-     :forms [:mitten-palm :grip-thumb] :material-role :skin
-     :socket (if (= side :left) :weapon/grip-support :weapon/grip-primary)}))
+    (let [socket (if (= side :left) :weapon/grip-support :weapon/grip-primary)]
+      {:mesh (fit-to-volume raw volume) :volume (assoc volume :kind :aabb)
+       :forms [:mitten-palm :grip-thumb :mitten-wrap-contact] :material-role :skin
+       :socket socket
+       :contact {:socket socket :position center :form :mitten-wrap-contact}})))
 
 (defn resolve-meshes
   "Generate fitted actual meshes from authoritative operator-fit data."

@@ -45,6 +45,27 @@
     (is (not= (get-in rifle [:sockets :primary-grip :position])
               (get-in rifle [:sockets :support-grip :position])))))
 
+(deftest authored-rifle-has-curved-silhouette-surface-sockets-and-fit-bounds
+  (let [rifle (weapon/resolve-weapon {:tier :hero})
+        normals (partition 3 (get-in rifle [:mesh :normals]))
+        curved (filter #(>= (count (filter (fn [v] (> (Math/abs (double v)) 0.15)) %)) 2)
+                       normals)
+        primary (get-in rifle [:sockets :primary-grip])
+        support (get-in rifle [:sockets :support-grip])]
+    (is (> (/ (count curved) (double (count normals))) 0.45))
+    (is (= :grip (get-in primary [:contact-surface :component])))
+    (is (= :handguard (get-in support [:contact-surface :component])))
+    ;; Primary is authored on the ellipsoid grip; support is on handguard underside.
+    (let [[x y z] (:position primary)]
+      (is (< (Math/abs (- 1.0 (+ (Math/pow (/ (- x 0.045) 0.055) 2.0)
+                                  (Math/pow (/ (+ y 0.23) 0.16) 2.0)
+                                  (Math/pow (/ (+ z 0.01) 0.08) 2.0)))) 0.01)))
+    (is (= -0.10 (second (:position support))))
+    (is (= :capsule (get-in rifle [:fit-volume :kind])))
+    (is (= #{:weapon :accent :emissive} (set (map :material-role (:material-ranges rifle)))))
+    (doseq [r (:material-ranges rifle)]
+      (is (every? pos? (get-in r [:bounds :half]))))))
+
 (deftest equipment-primary-weapon-points-to-the-actual-mesh-contract
   (let [part (equipment/part (equipment/resolve-kit {}) :equipment/weapon-primary)]
     (is (= :character.weapon/stylized-rifle (:mesh-semantic part)))
