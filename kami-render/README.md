@@ -272,6 +272,24 @@ selection is always `:preserve-all`, so framing never erases the environment.
 Stylized is implemented; photoreal reserves the same API and remains explicit
 future work.
 
+### Camera-safe environment composition
+
+`kami.render.environment-composition/compose` projects all eight corners of
+each candidate world AABB through a resolved production character camera. It
+selects only props contained by normalized safe-screen bounds, outside a padded
+subject projection, grounded within tolerance, and with a visible projected
+ground-contact point. Public `project-point` and `project-aabb` functions expose
+the identical projection contract to renderer and Studio tooling.
+
+Candidate order is deterministic by descending priority then semantic id. The
+result includes selected placements, rejected candidates with reasons, projected
+bounds, ground-contact evidence, the subject exclusion rectangle, and the exact
+ordering used. No valid candidate produces an evidence-bearing fail-closed
+exception. Composition copies the camera's skinned subject selection but fixes
+world selection to `:preserve-all`; it cannot turn environment composition into
+a subject-only render. Stylized is implemented while photoreal retains the same
+future API boundary and rejects until implemented.
+
 Enabled equipment includes the adjusted transform plus its original mesh intent
 and attachment semantic, so a consumer applies the result without duplicating
 KAMI offsets. Entity-stable micro-variation is applied only inside validated
