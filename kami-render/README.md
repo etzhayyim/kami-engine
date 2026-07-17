@@ -201,6 +201,18 @@ hero/gameplay/crowd budgets. It returns numeric clearance, intersections,
 occupancy, constraints and error categories, and `resolve-fit` refuses an
 invalid result rather than shipping intersecting fallback transforms.
 
+`kami.render.arm-ik/solve` extends the fit with an analytic two-bone chain for
+each arm. It accepts bind shoulder/elbow/hand centers, grip target, outward pole
+hint and segment lengths. It returns solved centers, upper/lower centers,
+quaternions, 16-value palette delta matrices, continuity endpoints, target
+error, elbow angle, reach-clamp and hyperextension evidence. `resolve-fit`
+includes these under `:arm-chains :left/:right` and rejects a production chain
+whose grip error exceeds 0.025 or whose endpoints are discontinuous.
+
+Unreachable standalone targets clamp inside maximum reach while preserving a
+bent elbow and continuous segment endpoints. The photoreal solver uses the same
+future boundary but remains explicitly unsupported.
+
 Enabled equipment includes the adjusted transform plus its original mesh intent
 and attachment semantic, so a consumer applies the result without duplicating
 KAMI offsets. Entity-stable micro-variation is applied only inside validated

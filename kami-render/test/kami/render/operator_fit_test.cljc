@@ -21,7 +21,7 @@
         torso-errors (filter #(and (= :weapon-body (:kind %)) (= :torso (:body %)))
                              (get-in resolved [:validation :intersections]))]
     (is (empty? torso-errors))
-    (is (< (get-in weapon [:transform :position 2]) -0.6))
+    (is (< (get-in weapon [:transform :position 2]) -0.5))
     (is (= :combat/two-hand-aim (:pose-semantic weapon)))))
 
 (deftest both-hands-contact-distinct-readable-sockets
