@@ -255,6 +255,23 @@ explicit no-torso-mask occupancy result. Fitted hands expose a matching
 `:mitten-wrap-contact` at their solved primary/support grip positions. The same
 family APIs reserve photoreal realization but reject it until implemented.
 
+### Production character camera
+
+`kami.render.character-camera/resolve-camera` produces a reusable renderer and
+Studio camera contract from subject world bounds. Front and left/right
+three-quarter orbits target 35% screen-height coverage inside the required
+28–42% range, retain head/feet margins, ground and horizon evidence, and return
+position, look-at, up, vertical FOV, clipping planes, and viewport.
+
+The deterministic settle searches fixed orbit/distance candidates around camera
+collisions and subject occluders. It returns the selected attempt, stable-frame
+count, zero final delta, and complete framing evidence; if none is valid it
+throws with attempted evidence instead of exporting a bad shot. Selection is
+split deliberately: only skinned entities use `:subject-only`, while world
+selection is always `:preserve-all`, so framing never erases the environment.
+Stylized is implemented; photoreal reserves the same API and remains explicit
+future work.
+
 Enabled equipment includes the adjusted transform plus its original mesh intent
 and attachment semantic, so a consumer applies the result without duplicating
 KAMI offsets. Entity-stable micro-variation is applied only inside validated
