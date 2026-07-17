@@ -4,7 +4,8 @@
   Parts are asset-independent mesh intents attached to humanoid semantics. A
   host resolves `:mesh-semantic` to an authored glTF/VRM primitive and emits the
   existing render-IR `:meshes` fields (`:id`, `:skin`, `:material`)."
-  (:require [kami.render.character-preset :as character]))
+  (:require [kami.render.character-material :as character-material]
+            [kami.render.character-preset :as character]))
 
 (def contract :kotoba.render/equipment-kit-v1)
 
@@ -48,7 +49,7 @@
     :attachment {:semantic-id :humanoid/head :mode :rigid
                  :local-transform {:position [0.0 0.04 -0.10]
                                    :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}}
-    :material-role :metal :silhouette-landmark :face
+    :material-role :visor :silhouette-landmark :face
     :outline-policy {:participates? true :weight 0.72 :crease-weight 0.35}
     :tiers (tier {:enabled? true :triangles 800 :lod :lod0}
                  {:enabled? true :triangles 300 :lod :lod1}
@@ -60,7 +61,7 @@
     :attachment {:semantic-id :humanoid/left-upper-arm :mode :rigid
                  :local-transform {:position [0.0 0.12 0.0]
                                    :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}}
-    :material-role :metal :silhouette-landmark :shoulders
+    :material-role :accent :silhouette-landmark :shoulders
     :outline-policy {:participates? true :weight 1.0 :crease-weight 0.72}
     :tiers (tier {:enabled? true :triangles 1200 :lod :lod0}
                  {:enabled? true :triangles 500 :lod :lod1}
@@ -72,7 +73,7 @@
     :attachment {:semantic-id :humanoid/right-upper-arm :mode :rigid
                  :local-transform {:position [0.0 0.12 0.0]
                                    :rotation [0.0 0.0 0.0 1.0] :scale [-1.0 1.0 1.0]}}
-    :material-role :metal :silhouette-landmark :shoulders
+    :material-role :accent :silhouette-landmark :shoulders
     :outline-policy {:participates? true :weight 1.0 :crease-weight 0.72}
     :tiers (tier {:enabled? true :triangles 1200 :lod :lod0}
                  {:enabled? true :triangles 500 :lod :lod1}
@@ -84,7 +85,7 @@
     :attachment {:semantic-id :humanoid/chest :mode :rigid
                  :local-transform {:position [0.0 0.0 -0.03]
                                    :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}}
-    :material-role :metal :silhouette-landmark :torso
+    :material-role :accent :silhouette-landmark :torso
     :outline-policy {:participates? true :weight 0.92 :crease-weight 0.78}
     :tiers (tier {:enabled? true :triangles 2600 :lod :lod0}
                  {:enabled? true :triangles 1000 :lod :lod1}
@@ -120,7 +121,7 @@
     :attachment {:semantic-id :humanoid/right-hand :socket :weapon/grip-primary :mode :rigid
                  :local-transform {:position [0.0 0.0 0.0]
                                    :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}}
-    :material-role :metal :silhouette-landmark :weapon
+    :material-role :weapon :silhouette-landmark :weapon
     :outline-policy {:participates? true :weight 1.0 :crease-weight 0.76}
     :tiers (tier {:enabled? true :triangles 6500 :lod :lod0}
                  {:enabled? true :triangles 2400 :lod :lod1}
@@ -137,7 +138,7 @@
   (reduce (fn [acc code] (mod (+ (* acc 31) code) 2147483647))
           7 (char-codes (str value))))
 
-(defn- resolve-part [entity-id tier-id material-roles [part-id part]]
+(defn- resolve-part [entity-id tier-id materials [part-id part]]
   (let [tier-data (get-in part [:tiers tier-id])
         variants (get-in part [:variation :variants])
         seed (stable-seed (str entity-id "|" (name part-id)))
@@ -148,7 +149,7 @@
             :enabled? (:enabled? tier-data)
             :geometry {:triangles (:triangles tier-data) :lod (:lod tier-data)
                        :reason (:reason tier-data)}
-            :material (character/material-for material-roles role)
+            :material (get materials role)
             :variation (assoc (:variation part) :seed seed :variant-index (mod seed variants))
             :mesh {:id part-id :mesh-semantic (:mesh-semantic part)
                    :skin :character/rig :material role
@@ -159,7 +160,7 @@
 
   Disabled tier parts remain in `:parts` as explicit cull evidence. `:meshes`
   contains only enabled render-IR-compatible mesh intents."
-  [{:keys [family tier entity-id character-preset]
+  [{:keys [family tier entity-id character-preset team-palette]
     :or {family :stylized tier :gameplay entity-id :character/default
          character-preset :combat-readable}}]
   (when-not (contains? (:implemented-families family-boundary) family)
@@ -171,7 +172,8 @@
                       {:tier tier :known-tiers (set (keys tier-budgets))})))
     (let [character (character/resolve-character
                      {:family family :preset character-preset :silhouette-tier tier})
-          resolved (into {} (map (partial resolve-part entity-id tier character) parts))
+          materials (character-material/lower-library character {:team-palette (or team-palette {})})
+          resolved (into {} (map (partial resolve-part entity-id tier materials) parts))
           enabled (filter (comp :enabled? val) resolved)
           triangles (reduce + (map #(get-in % [1 :geometry :triangles]) enabled))
           max-triangles (:max-equipment-triangles budget)]
@@ -188,6 +190,7 @@
                   :mode :rigid-bone-attachment}
        :parts resolved
        :meshes (mapv (comp :mesh val) enabled)
+       :material-registry (select-keys materials (set (map (comp :material-role val) enabled)))
        :budget (assoc budget :resolved-triangles triangles
                       :headroom-triangles (- max-triangles triangles))
        :outline-policy {:mode :screen-space :source :render/style
