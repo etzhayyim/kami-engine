@@ -36,4 +36,32 @@ Legacy MToon material `:outline 0.02` remains accepted as a per-material
 `:outline-hint`; the scene-wide outline pass is controlled only by
 `:render/style :outline`.
 
+## GPU execution ABI
+
+`shaders/style_postfx.wgsl` executes outline, ACES tone mapping, saturation,
+and contrast in one fullscreen-triangle pass. `postfx-execution` produces its
+portable bind-group and draw contract. Group 0 is stable across both profiles:
+
+| Binding | Resource | Exact semantic |
+|---:|---|---|
+| 0 | `texture_2d<f32>` | resolved, single-sample, linear-HDR scene color |
+| 1 | `texture_depth_2d` | WebGPU device depth `[0,1]`, clear value `1` |
+| 2 | `texture_2d<f32>` | unit normal encoded `normal * 0.5 + 0.5`; zero means background |
+| 3 | filtering sampler | scene-color sampling only |
+| 4 | 64-byte uniform | `:kami.render/style-postfx-v1` |
+
+Depth threshold is an absolute difference in device-depth units. Normal
+threshold is `1 - dot(normalA, normalB)`. Outline width is rounded to
+an integer radius and clamped to 1–8 pixels. The pass outputs display-linear
+color to an sRGB target; hosts must not apply a second manual gamma transform.
+
+The host declares `:normal-space :world` or `:view` in the execution resources.
+Every pixel in an attachment must use the same space. Edge detection uses only
+normal dot products, so either declared space produces the same result under a
+rigid camera transform.
+
+Both stylized and photoreal bind all resources. Photoreal sets
+`outline-enabled = 0`, avoiding pipeline-layout variants while retaining ACES
+and color grading. Upstream MSAA targets must be resolved before this pass.
+
 Run the contract tests with `clojure -M:test` from this directory.
