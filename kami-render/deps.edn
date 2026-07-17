@@ -1,4 +1,7 @@
 {:paths ["src"]
+ :deps {io.github.kotoba-lang/render
+        {:git/url "https://github.com/kotoba-lang/render.git"
+         :git/sha "e4754dd2f0dc22ee815e8e90e7cb910817490548"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

@@ -143,3 +143,22 @@ emissive and weapon overrides fail validation. The equipment kit automatically
 selects only materials referenced by enabled hero/gameplay/crowd parts for its
 `:material-registry`. Photoreal uses the same API boundary but is rejected until
 its PBR lowering is implemented.
+
+### Actual stylized weapon meshes
+
+`kami.render.weapon-mesh/resolve-weapon` generates an actual indexed rifle,
+not a placeholder stick. It reuses `kotoba.render.mesh` primitives and combines
+receiver, barrel, stock, grip, magazine, optic, muzzle, and handguard components
+into flat `positions/normals/uvs/indices` arrays with contiguous material
+ranges. Material roles are `weapon`, `accent`, and `emissive` and resolve through
+the executor material library above.
+
+Hero and gameplay retain all eight components with different radial detail;
+crowd retains receiver/barrel/stock/magazine as a readable reduced rifle and
+records the other components as LOD-culled. Each tier enforces its actual
+generated triangle budget.
+
+The result includes right-hand attachment, primary grip, and support-hand grip
+semantic sockets, screen-space outline participation, and deterministic stock,
+handguard, optic, and muzzle proportions derived from the entity id. The
+photoreal family reserves exactly the same API but is rejected until implemented.
