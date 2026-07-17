@@ -27,7 +27,8 @@
    :upper-arm-left {:kind :aabb :center [-0.40 1.34 0.0] :half [0.12 0.24 0.12]}
    :upper-arm-right {:kind :aabb :center [0.40 1.34 0.0] :half [0.12 0.24 0.12]}})
 
-(def ^:private equipment-layout
+(def equipment-layout
+  "Authoritative fitted transforms and bounds consumed by equipment mesh authors."
   {:equipment/helmet
    {:transform {:position [0.0 1.90 0.0] :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}
     :volume {:kind :aabb :center [0.0 1.90 0.0] :half [0.19 0.19 0.17]}
@@ -37,21 +38,21 @@
     :volume {:kind :aabb :center [0.0 1.82 -0.20] :half [0.16 0.07 0.025]}
     :mounted-on :head :silhouette-area 0.020}
    :equipment/shoulder-left
-   {:transform {:position [-0.54 1.47 0.0] :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}
-    :volume {:kind :aabb :center [-0.54 1.47 0.0] :half [0.14 0.13 0.16]}
-    :mounted-on :upper-arm-left :silhouette-area 0.046}
+   {:transform {:position [-0.52 1.47 0.0] :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}
+    :volume {:kind :aabb :center [-0.52 1.47 0.0] :half [0.12 0.11 0.14]}
+    :mounted-on :upper-arm-left :silhouette-area 0.034}
    :equipment/shoulder-right
-   {:transform {:position [0.54 1.47 0.0] :rotation [0.0 0.0 0.0 1.0] :scale [-1.0 1.0 1.0]}
-    :volume {:kind :aabb :center [0.54 1.47 0.0] :half [0.14 0.13 0.16]}
-    :mounted-on :upper-arm-right :silhouette-area 0.046}
+   {:transform {:position [0.52 1.47 0.0] :rotation [0.0 0.0 0.0 1.0] :scale [-1.0 1.0 1.0]}
+    :volume {:kind :aabb :center [0.52 1.47 0.0] :half [0.12 0.11 0.14]}
+    :mounted-on :upper-arm-right :silhouette-area 0.034}
    :equipment/chest-armour
    {:transform {:position [0.0 1.38 -0.245] :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}
     :volume {:kind :aabb :center [0.0 1.38 -0.245] :half [0.30 0.24 0.055]}
     :mounted-on :torso :silhouette-area 0.183}
    :equipment/backpack
    {:transform {:position [0.0 1.37 0.43] :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}
-    :volume {:kind :aabb :center [0.0 1.37 0.43] :half [0.28 0.34 0.14]}
-    :silhouette-area 0.150}
+    :volume {:kind :aabb :center [0.0 1.37 0.43] :half [0.24 0.29 0.12]}
+    :silhouette-area 0.110}
    :equipment/belt
    {:transform {:position [0.0 0.90 -0.19] :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}
     :volume {:kind :aabb :center [0.0 0.90 -0.19] :half [0.27 0.08 0.05]}

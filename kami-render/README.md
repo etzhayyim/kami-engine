@@ -213,6 +213,31 @@ Unreachable standalone targets clamp inside maximum reach while preserving a
 bent elbow and continuous segment endpoints. The photoreal solver uses the same
 future boundary but remains explicitly unsupported.
 
+### Actual fitted equipment and grip hands
+
+`kami.render.fitted-equipment-mesh/resolve-meshes` replaces fitted box intents
+with actual curved indexed geometry for helmet, visor, chest, shoulders,
+backpack, belt, and readable mitten/grip hands. Dome/rim, curved lens,
+capsule-plate, beveled shell, rounded pack/roll, and curved belt forms reuse the
+shared sphere/cylinder/capsule primitives.
+
+Every authored mesh is normalized to the authoritative AABB exported by
+`operator-fit/equipment-layout`; returned `:bounds` and `:fit-volume` therefore
+match exactly. The validator and renderer cannot silently disagree about
+clearance. Shoulder and backpack bounds/occupancy were reduced before authoring
+to preserve the operator silhouette.
+
+Each hero/gameplay/crowd result contains actual positions, unit normals, UVs,
+indices, material ranges, executor materials, triangle budget, original fit
+transforms, two-bone arm chains, and weapon sockets. Hand centers are the solved
+IK hand centers, preserving zero socket error and chain continuity. Photoreal
+reserves the same API but remains explicitly unsupported.
+
+The result and every part declare `:space :operator-bind-world`: mesh positions
+are already fitted in operator bind-world space. Consumers render those streams
+directly and must not apply the retained diagnostic `:transform` a second time.
+The `:lod` map records the selected tier and tessellation policy.
+
 Enabled equipment includes the adjusted transform plus its original mesh intent
 and attachment semantic, so a consumer applies the result without duplicating
 KAMI offsets. Entity-stable micro-variation is applied only inside validated
