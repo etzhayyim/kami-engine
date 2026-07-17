@@ -117,7 +117,8 @@
     :variation {:variants 3 :channels #{:pouch-layout :holster-side}}}
 
    :equipment/weapon-primary
-   {:part/id :equipment/weapon-primary :mesh-semantic :character.equipment/weapon-primary
+   {:part/id :equipment/weapon-primary :mesh-semantic :character.weapon/stylized-rifle
+    :mesh-contract :kotoba.render/weapon-mesh-v1
     :attachment {:semantic-id :humanoid/right-hand :socket :weapon/grip-primary :mode :rigid
                  :local-transform {:position [0.0 0.0 0.0]
                                    :rotation [0.0 0.0 0.0 1.0] :scale [1.0 1.0 1.0]}}
@@ -151,9 +152,10 @@
                        :reason (:reason tier-data)}
             :material (get materials role)
             :variation (assoc (:variation part) :seed seed :variant-index (mod seed variants))
-            :mesh {:id part-id :mesh-semantic (:mesh-semantic part)
-                   :skin :character/rig :material role
-                   :attachment (:attachment part)})]))
+            :mesh (cond-> {:id part-id :mesh-semantic (:mesh-semantic part)
+                           :skin :character/rig :material role
+                           :attachment (:attachment part)}
+                    (:mesh-contract part) (assoc :mesh-contract (:mesh-contract part))))]))
 
 (defn resolve-kit
   "Resolve all semantic parts for an entity and silhouette tier.
