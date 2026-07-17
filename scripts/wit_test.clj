@@ -9,7 +9,7 @@
          '[clojure.edn :as edn]
          '[clojure.string :as str])
 
-;; wit/kami-interface.edn was datomic/datascript-ized by edn-datomize.bb
+;; wit/kami-interface.edn was datomic/datascript-ized by edn-datomize.cljs
 ;; (wrap-map, ns="wit.kami-interface"): top level is now `[{:db/id -1
 ;; :wit.kami-interface/package ... :wit.kami-interface/interfaces "..." ...}]`
 ;; tx-data, with the nested :interfaces/:exports maps pr-str'd into blob string
