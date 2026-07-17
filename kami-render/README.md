@@ -282,6 +282,13 @@ ground-contact point inside the production lower-frame band (default normalized
 screen Y `0.38–0.92`). Public `project-point` and `project-aabb` functions expose
 the identical projection contract to renderer and Studio tooling.
 
+Individual descriptors may override the band with top-level
+`:ground-contact-screen-y-range`; this allows a background building base around
+Y `0.47` while requiring foreground props at Y `0.58` or lower in frame. Optional
+`:screen-extent-range [min max]` validates the larger projected AABB width/height
+and rejects unreadably tiny or frame-dominating candidates as
+`:screen-extent-outside-range`.
+
 Candidate order is deterministic by descending priority then semantic id. The
 result includes selected placements, rejected candidates with reasons, projected
 bounds, ground-contact evidence, the subject exclusion rectangle, and the exact
@@ -296,6 +303,10 @@ future API boundary and rejects until implemented.
 Candidates may declare a `:composition-region`. When policy supplies
 `:required-composition-regions`, selection deterministically reserves one safe
 candidate per required region before filling remaining capacity by priority.
+For density targets, `:required-composition-region-counts` reserves the exact N
+per region (for example three left, three right, and one building) before the
+same priority fill. Evidence reports required counts, selected counts, and exact
+per-region shortages.
 Evidence reports selected region counts and missing regions; missing coverage
 fails closed, preventing a dense left or right candidate set from starving the
 opposite foreground slot.

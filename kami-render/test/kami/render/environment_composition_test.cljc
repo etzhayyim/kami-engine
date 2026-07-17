@@ -151,3 +151,79 @@
                               :bounds {:min [2.1 0.0 -0.2] :max [2.6 0.7 0.25]}}]
                 :policy {:required-composition-regions #{:foreground-right}}})]
     (is (= [:prop/right] (mapv :id (:placements valid))))))
+
+(deftest candidate-specific-ground-bands-support-building-and-foreground-depths
+  (let [candidates [{:id :building/background :composition-region :building
+                     :ground-contact-screen-y-range [0.44 0.52]
+                     :screen-extent-range [0.02 0.35]
+                     :bounds {:min [7.0 0.0 29.0] :max [9.0 5.0 31.0]}}
+                    {:id :prop/foreground :composition-region :foreground-right
+                     :ground-contact-screen-y-range [0.58 0.92]
+                     :screen-extent-range [0.02 0.35]
+                     :bounds {:min [3.5 0.0 2.7] :max [4.2 1.0 3.3]}}]
+        result (composition/compose
+                {:resolved-camera resolved :subject-bounds subject :candidates candidates
+                 :policy {:required-composition-region-counts
+                          {:building 1 :foreground-right 1}}})
+        ys (get-in result [:evidence :selected-ground-contact-screen-y])]
+    (is (<= 0.44 (get ys :building/background) 0.52))
+    (is (<= 0.58 (get ys :prop/foreground) 0.92))
+    (is (= [0.44 0.52] (get-in result [:evidence
+                                       :selected-ground-contact-screen-y-ranges
+                                       :building/background])))
+    (is (= [0.58 0.92] (get-in result [:evidence
+                                       :selected-ground-contact-screen-y-ranges
+                                       :prop/foreground])))))
+
+(deftest required-region-counts-reserve-three-per-side-before-fill
+  (let [candidate (fn [side i priority]
+                    (let [left? (= side :left)
+                          x (+ (if left? -3.3 2.0) (* i 0.38))]
+                      {:id (keyword (str "prop." (name side)) (str i))
+                       :priority priority
+                       :composition-region (if left? :foreground-left :foreground-right)
+                       :screen-side side
+                       :bounds {:min [x 0.0 0.0] :max [(+ x 0.25) 0.55 0.25]}}))
+        lefts (mapv #(candidate :left % (- 100 %)) (range 5))
+        rights (mapv #(candidate :right % (- 10 %)) (range 3))
+        result (composition/compose
+                {:resolved-camera resolved :subject-bounds subject
+                 :candidates (into lefts rights)
+                 :policy {:maximum-selected 6
+                          :required-composition-region-counts
+                          {:foreground-left 3 :foreground-right 3}}})]
+    (is (= {:foreground-left 3 :foreground-right 3}
+           (get-in result [:evidence :selected-region-counts])))
+    (is (= {:foreground-left 3 :foreground-right 3}
+           (get-in result [:evidence :required-composition-region-counts])))
+    (is (empty? (get-in result [:evidence :composition-region-shortages])))
+    (is (= 6 (count (:placements result))))))
+
+(deftest region-quota-shortage-fails-closed-with-exact-count
+  (let [failure (try
+                  (composition/compose
+                   {:resolved-camera resolved :subject-bounds subject
+                    :candidates [{:id :prop/only-right
+                                  :composition-region :foreground-right
+                                  :bounds {:min [2.1 0.0 0.0] :max [2.4 0.5 0.2]}}]
+                    :policy {:required-composition-region-counts
+                             {:foreground-right 3}}})
+                  nil
+                  (catch #?(:clj Exception :cljs js/Error) error error))]
+    (is (= {:foreground-right 2}
+           (get-in (ex-data failure) [:evidence :composition-region-shortages])))))
+
+(deftest projected-screen-extent-rejects-tiny-or-oversized-candidates
+  (let [tiny {:id :prop/tiny :screen-extent-range [0.05 0.30]
+              :bounds {:min [7.0 0.0 29.0] :max [7.01 0.01 29.01]}}
+        oversized {:id :prop/oversized :screen-extent-range [0.001 0.05]
+                   :bounds {:min [1.5 0.0 0.0] :max [3.0 1.0 0.3]}}
+        failure (try
+                  (composition/compose {:resolved-camera resolved :subject-bounds subject
+                                        :candidates [tiny oversized]})
+                  nil
+                  (catch #?(:clj Exception :cljs js/Error) error error))
+        evaluated (:evaluated (ex-data failure))]
+    (is (every? #(some #{:screen-extent-outside-range} (:reasons %)) evaluated))
+    (is (< (:screen-extent (first (filter #(= :prop/tiny (:id %)) evaluated))) 0.05))
+    (is (> (:screen-extent (first (filter #(= :prop/oversized (:id %)) evaluated))) 0.05))))
