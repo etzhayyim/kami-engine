@@ -185,3 +185,24 @@ helmet, armour, backpack, and rifle kits attach without translation.
 
 The photoreal sibling reserves the same anatomy, skinning, material-range and
 attachment API but is rejected until its real mesh family is implemented.
+
+### Validated operator fitting
+
+`kami.render.operator-fit/resolve-fit` returns the adjusted transforms Royale
+should consume for a readable two-hand combat pose. The rifle is yawed and
+offset ahead of the torso; primary and support sockets become explicit right
+and left hand targets. Shoulder armour moves outside the torso envelope and the
+backpack moves behind it with measured clearance.
+
+The result includes conservative body/equipment AABBs and a rifle capsule.
+`validate-fit` checks weapon/body, equipment/body, and shoulder/backpack
+clearance; grip separation; and projected silhouette occupancy against distinct
+hero/gameplay/crowd budgets. It returns numeric clearance, intersections,
+occupancy, constraints and error categories, and `resolve-fit` refuses an
+invalid result rather than shipping intersecting fallback transforms.
+
+Enabled equipment includes the adjusted transform plus its original mesh intent
+and attachment semantic, so a consumer applies the result without duplicating
+KAMI offsets. Entity-stable micro-variation is applied only inside validated
+clearance headroom. Photoreal reserves the same fit/validation boundary but is
+explicitly unsupported until its body and equipment volumes are authored.
