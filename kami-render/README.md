@@ -238,6 +238,23 @@ are already fitted in operator bind-world space. Consumers render those streams
 directly and must not apply the retained diagnostic `:transform` a second time.
 The `:lod` map records the selected tier and tessellation policy.
 
+### Authored weapon and face forms
+
+`kami.render.weapon-mesh/resolve-weapon` v2 replaces flat receiver intent with
+rounded indexed receiver, stock, grip, magazine, handguard, barrel, optic, and
+muzzle forms. Primary and support sockets are authored on the grip and
+handguard surfaces; the returned local bounds and fit capsule travel with the
+same portable socket semantics used by operator-fit. Hero/gameplay/crowd tiers
+reduce tessellation while retaining a readable rifle silhouette and semantic
+material ranges for weapon, accent, and emissive surfaces.
+
+`kami.render.operator-face-mesh/resolve-face` authors eyes, eyebrows, nose, and
+mouth as small curved indexed forms in operator bind-world space. Their union
+stays within the head landmark, declares visor compatibility, and carries an
+explicit no-torso-mask occupancy result. Fitted hands expose a matching
+`:mitten-wrap-contact` at their solved primary/support grip positions. The same
+family APIs reserve photoreal realization but reject it until implemented.
+
 Enabled equipment includes the adjusted transform plus its original mesh intent
 and attachment semantic, so a consumer applies the result without duplicating
 KAMI offsets. Entity-stable micro-variation is applied only inside validated
