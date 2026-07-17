@@ -91,3 +91,28 @@ The sibling `:photoreal` family and its PBR model are reserved in
 `family-boundary`, but deliberately fail resolution until measured photoreal
 presets exist. Its semantic roles and resolver envelope are already fixed, so
 games will not need different asset slots or role ids when it is implemented.
+
+### Equipment and silhouette detail kit
+
+`kami.render.equipment-kit/resolve-kit` adds portable semantic mesh intents for
+helmet, visor, left/right shoulder armour, chest armour, backpack, belt, and a
+primary weapon. Parts attach to stable humanoid semantics such as
+`:humanoid/head`, `:humanoid/chest`, and `:humanoid/right-hand`; the weapon also
+declares `:weapon/grip-primary`.
+
+```clojure
+(resolve-kit {:family :stylized
+              :tier :gameplay
+              :entity-id :operator/alpha
+              :character-preset :combat-readable})
+```
+
+The resolved `:meshes` reuse render-IR fields `:id`, `:skin`, and `:material`
+while `:mesh-semantic` remains an asset-registry lookup rather than a fake URL.
+Hero/gameplay/crowd each select explicit LOD and triangle budgets. Culled parts
+remain in `:parts` with `:enabled? false` and a reason, providing auditable LOD
+evidence. Variation uses a portable stable seed derived from entity and part
+IDs. Every part carries its material role and outline policy.
+
+The photoreal sibling reserves the same part, attachment, mesh and material-role
+API but fails resolution until its assets and presets are genuinely available.
