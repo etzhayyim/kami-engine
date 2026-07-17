@@ -32,9 +32,8 @@ here.
 ## Verify
 
 ```bash
-bb wit-check
-bb adapter-check
-bb test
+bb scripts/wit_test.clj
+bb scripts/check_adapter_registry.clj
 ```
 
 The default path should not contain `Cargo.toml`, `Cargo.lock`, `.rs`,
