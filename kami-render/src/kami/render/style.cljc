@@ -81,6 +81,12 @@
     (when-not (contains? (:outline-modes capabilities) outline-mode)
       (throw (ex-info "Unsupported KAMI outline mode"
                       {:mode outline-mode :supported (:outline-modes capabilities)})))
+    (when (and (= :screen-space outline-mode)
+               (not (and (number? (get-in result [:outline :width-px]))
+                         (<= 1.0 (get-in result [:outline :width-px]) 8.0))))
+      (throw (ex-info "Screen-space outline width must be within executable range"
+                      {:width-px (get-in result [:outline :width-px])
+                       :range [1.0 8.0]})))
     result))
 
 (defn scene-style
@@ -115,6 +121,101 @@
                            :shade-smoothness (:smoothness shading)}
                           {:model :pbr :metallic 0.0 :roughness 0.5})
      :resolved-style resolved}))
+
+(def style-postfx-bindings
+  "Portable group(0) ABI for `src/shaders/style_postfx.wgsl`."
+  [{:binding 0 :name :scene-color :resource :texture-2d-f32
+    :semantic :resolved-single-sample-linear-hdr}
+   {:binding 1 :name :scene-depth :resource :texture-depth-2d
+   :semantic :webgpu-device-depth-0-to-1}
+   {:binding 2 :name :scene-normal :resource :texture-2d-f32
+    :semantic :unit-normal-encoded-0-to-1-zero-background
+    :space :backend-declared-world-or-view}
+   {:binding 3 :name :scene-sampler :resource :filtering-sampler}
+   {:binding 4 :name :params :resource :uniform-buffer
+    :size-bytes 64 :layout :kami.render/style-postfx-v1}])
+
+(def style-postfx-uniform-layout
+  "WGSL uniform byte offsets. Scalar enum values are documented by `postfx-uniform`."
+  [{:field :inv-resolution :offset 0 :type :vec2-f32}
+   {:field :outline-width-px :offset 8 :type :f32}
+   {:field :depth-threshold :offset 12 :type :f32}
+   {:field :normal-threshold :offset 16 :type :f32}
+   {:field :saturation :offset 20 :type :f32}
+   {:field :contrast :offset 24 :type :f32}
+   {:field :exposure :offset 28 :type :f32}
+   {:field :outline-color :offset 32 :type :vec4-f32}
+   {:field :outline-enabled :offset 48 :type :u32}
+   {:field :tone-map :offset 52 :type :u32}
+   {:field :_pad :offset 56 :type :vec2-u32}])
+
+(def execution-capabilities
+  "Capabilities proven by the shared style-v1 shader asset and contract tests."
+  {:implementation :kami-render/style-postfx-v1
+   :shader "shaders/style_postfx.wgsl"
+   :shader-validation :naga
+   :outline-modes #{:none :screen-space}
+   :normal-spaces #{:world :view}
+   :tone-maps #{:none :aces}
+   :max-outline-width-px 8.0
+   :input-color :resolved-single-sample-linear-hdr
+   :output-color :display-linear-to-srgb-target})
+
+(defn postfx-uniform
+  "Build the named 64-byte style-postfx uniform value.
+
+  The host is responsible for std140/WGSL-compatible packing in the documented
+  field order; named data keeps this CLJC contract portable."
+  [style width height]
+  (when-not (and (pos? width) (pos? height))
+    (throw (ex-info "Style postfx target dimensions must be positive"
+                    {:width width :height height})))
+  (let [{:keys [outline color-grading]} (normalize style)
+        outline-enabled (= :screen-space (:mode outline))]
+    {:inv-resolution [(/ 1.0 width) (/ 1.0 height)]
+     :outline-width-px (if outline-enabled (:width-px outline) 0.0)
+     :depth-threshold (:depth-threshold outline)
+     :normal-threshold (:normal-threshold outline)
+     :saturation (:saturation color-grading)
+     :contrast (:contrast color-grading)
+     :exposure (or (:exposure color-grading) 1.0)
+     :outline-color (:color outline)
+     :outline-enabled (if outline-enabled 1 0)
+     :tone-map (case (:tone-map color-grading) :aces 1 :none 0
+                     (throw (ex-info "Unsupported KAMI tone map"
+                                     {:tone-map (:tone-map color-grading)
+                                      :supported #{:aces :none}})))
+     :_pad [0 0]}))
+
+(defn postfx-execution
+  "Return an executable fullscreen-pass contract for a style-v1 frame.
+
+  `attachments` must name real upstream resources. Missing G-buffer inputs are
+  rejected even when outline is disabled so one stable bind-group layout works
+  for both built-in profiles."
+  [style {:keys [width height scene-color scene-depth scene-normal normal-space output]
+          :as attachments}]
+  (let [missing (->> [:scene-color :scene-depth :scene-normal :normal-space :output]
+                     (remove #(some? (get attachments %)))
+                     vec)]
+    (when (seq missing)
+      (throw (ex-info "Style postfx execution is missing frame attachments"
+                      {:missing missing})))
+    (when-not (#{:world :view} normal-space)
+      (throw (ex-info "Style postfx normal space must be :world or :view"
+                      {:normal-space normal-space})))
+    {:pass :style-postfx
+     :implementation :kami-render/style-postfx-v1
+     :shader "shaders/style_postfx.wgsl"
+     :entry-points {:vertex :vs-main :fragment :fs-main}
+     :draw {:vertices 3 :instances 1}
+     :target {:texture output :color-space :srgb}
+     :bindings style-postfx-bindings
+     :resources {:scene-color scene-color
+                 :scene-depth scene-depth
+                 :scene-normal scene-normal
+                 :normal-space normal-space}
+     :uniform (postfx-uniform style width height)}))
 
 (defn material
   "Apply style defaults without replacing explicit per-material choices.
