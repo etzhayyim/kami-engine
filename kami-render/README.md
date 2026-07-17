@@ -65,3 +65,29 @@ Both stylized and photoreal bind all resources. Photoreal sets
 and color grading. Upstream MSAA targets must be resolved before this pass.
 
 Run the contract tests with `clojure -M:test` from this directory.
+
+## Stylized character library
+
+`kami.render.character-preset/resolve-character` composes reusable silhouette,
+MToon material-role, outline, variation and LOD policies:
+
+```clojure
+(resolve-character
+ {:family :stylized
+  :preset :hero-balanced
+  :silhouette-tier :hero
+  :palette {:cloth [0.8 0.2 0.1 1.0]}})
+```
+
+Built-in presets are `:hero-balanced`, `:combat-readable`, and
+`:crowd-efficient`; silhouette tiers are `:hero`, `:gameplay`, and `:crowd`.
+Every result has stable `:skin`, `:cloth`, and `:metal` roles using the shared
+`:kotoba.render/material-preset-v1` envelope. Each role contains MToon
+base/shade, shade shift/tooniness, rim, highlight, metallic/roughness,
+role-specific outline participation, deterministic variation, and the selected
+silhouette's LOD policy.
+
+The sibling `:photoreal` family and its PBR model are reserved in
+`family-boundary`, but deliberately fail resolution until measured photoreal
+presets exist. Its semantic roles and resolver envelope are already fixed, so
+games will not need different asset slots or role ids when it is implemented.
