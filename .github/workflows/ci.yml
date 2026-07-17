@@ -8,14 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21' }
       - uses: DeLaGuardo/setup-clojure@13.0
         with: { bb: 'latest' }
       - name: WIT interface — EDN IDL == world.wit == kami-clj Builtin map
-        run: bb wit-check
+        run: bb scripts/wit_test.clj
       - name: adapter registry
-        run: bb adapter-check
+        run: bb scripts/check_adapter_registry.clj
       - name: ensure Rust runtime files stay out
         run: |
           if find . \
