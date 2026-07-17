@@ -162,3 +162,26 @@ The result includes right-hand attachment, primary grip, and support-hand grip
 semantic sockets, screen-space outline participation, and deterministic stock,
 handguard, optic, and muzzle proportions derived from the entity id. The
 photoreal family reserves exactly the same API but is rejected until implemented.
+
+### Actual stylized operator body meshes
+
+`kami.render.operator-body-mesh/resolve-operator` replaces the primitive
+cuboid body with a complete actual indexed humanoid. Sixteen semantic parts
+cover head, neck, torso, pelvis, bilateral upper/lower arms, hands,
+upper/lower legs, and boots. Smooth sphere, cylinder, capsule, and scaled
+beveled forms reuse the exact-pinned `kotoba.render.mesh` primitives.
+
+Hero/gameplay/crowd generate distinct geometry densities while retaining the
+complete anatomy. Results contain positions, unit normals, UVs, indices,
+contiguous material ranges, and four-lane joint/weight streams using the shared
+`kotoba.render.character` joint order. Extremities use rigid weights; torso,
+neck, and limbs use explicit two-bone blends.
+
+Skin, cloth, metal, and accent roles resolve through portable executor
+materials and participate in style-v1 outlines. Entity-stable variants adjust
+head, shoulder, torso, and boot proportions. Bind-pose attachment semantics
+match equipment-kit head/chest/hips/upper-arm/right-hand IDs, so existing
+helmet, armour, backpack, and rifle kits attach without translation.
+
+The photoreal sibling reserves the same anatomy, skinning, material-range and
+attachment API but is rejected until its real mesh family is implemented.
