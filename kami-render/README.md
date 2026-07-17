@@ -116,3 +116,30 @@ IDs. Every part carries its material role and outline policy.
 
 The photoreal sibling reserves the same part, attachment, mesh and material-role
 API but fails resolution until its assets and presets are genuinely available.
+
+### Executor material lowering
+
+`kami.render.character-material/lower-library` converts
+`:kotoba.render/material-preset-v1` character envelopes into
+`:kotoba.render/portable-material-v1` records. KAMI owns these semantic roles:
+
+`skin`, `cloth`, `metal`, `visor`, `emissive`, `accent`, and `weapon`.
+
+Each output contains base color, toon shade color/shift/tooniness,
+metallic/roughness, emissive color/intensity, highlight, rim and outline. Its
+`:executor :uniforms` directly matches the existing MToon uniform semantics:
+`albedo`, `subsurface-color`, `sss-r0/r1/r2`, `hair-scatter`, and RGB emission.
+Consequently each role differs in its complete shader response, not merely its
+palette color.
+
+```clojure
+(lower-library character
+               {:team-palette {:cloth [0.1 0.7 0.2 1.0]
+                               :accent [0.95 0.8 0.1 1.0]}})
+```
+
+Team palettes may override only `cloth` and `accent`; skin, metal, visor,
+emissive and weapon overrides fail validation. The equipment kit automatically
+selects only materials referenced by enabled hero/gameplay/crowd parts for its
+`:material-registry`. Photoreal uses the same API boundary but is rejected until
+its PBR lowering is implemented.

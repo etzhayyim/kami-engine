@@ -23,8 +23,8 @@
       (is (= part-id (:part/id part)))
       (is (contains? (set (vals equipment/attachment-semantics))
                      (get-in part [:attachment :semantic-id])))
-      (is (contains? #{:skin :cloth :metal} (:material-role part)))
-      (is (= character/material-contract (get-in part [:material :contract])))
+      (is (contains? #{:metal :cloth :visor :accent :weapon} (:material-role part)))
+      (is (= :kotoba.render/portable-material-v1 (get-in part [:material :contract])))
       (is (boolean? (get-in part [:outline-policy :participates?])))
       (is (nat-int? (get-in part [:variation :variant-index]))))))
 
