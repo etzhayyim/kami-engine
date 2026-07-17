@@ -49,3 +49,61 @@
   (is (thrown? #?(:clj Exception :cljs js/Error)
                (composition/compose {:family :photoreal :resolved-camera resolved
                                      :subject-bounds subject :candidates []}))))
+
+(deftest ground-contact-must-be-in-visible-lower-frame-band
+  (let [sky-camera (assoc-in resolved [:camera :look-at] [0.0 -2.0 0.0])
+        floating {:id :prop/floating-looking
+                  :bounds {:min [2.1 0.0 -0.2] :max [2.6 0.10 0.3]}}
+        failure (try
+                  (composition/compose {:resolved-camera sky-camera
+                                        :subject-bounds subject :candidates [floating]})
+                  nil
+                  (catch #?(:clj Exception :cljs js/Error) error error))
+        data (ex-data failure)
+        contact-y (get-in data [:evaluated 0 :ground-contact :projection :screen 1])]
+    ;; The AABB is globally on-screen, but its base projects into sky/horizon.
+    (is (<= 0.19 contact-y 0.21))
+    (is (= [:ground-contact-outside-visible-ground-band]
+           (get-in data [:evaluated 0 :reasons])))
+    (is (= [0.38 0.92] (get-in data [:evidence :ground-contact-screen-y-range]))))
+  (let [valid (composition/compose
+               {:resolved-camera resolved :subject-bounds subject
+                :candidates [{:id :prop/lower-frame
+                              :bounds {:min [2.1 0.0 -0.2] :max [2.6 1.2 0.3]}}]})
+        y (get-in valid [:placements 0 :ground-contact :projection :screen 1])]
+    (is (<= 0.38 y 0.92))
+    (is (= y (get-in valid [:evidence :selected-ground-contact-screen-y
+                            :prop/lower-frame])))))
+
+(deftest required-regions-reserve-slots-before-priority-fill
+  (let [left (fn [id priority x]
+               {:id id :priority priority :composition-region :foreground-left
+                :bounds {:min [x 0.0 -0.2] :max [(+ x 0.35) 0.7 0.25]}})
+        candidates [(left :prop/left-a 100 -2.8)
+                    (left :prop/left-b 90 -2.4)
+                    (left :prop/left-c 80 -2.0)
+                    {:id :prop/right-only :priority 1
+                     :composition-region :foreground-right
+                     :bounds {:min [2.1 0.0 -0.2] :max [2.5 0.7 0.25]}}]
+        result (composition/compose
+                {:resolved-camera resolved :subject-bounds subject :candidates candidates
+                 :policy {:maximum-selected 2
+                          :required-composition-regions
+                          #{:foreground-left :foreground-right}}})]
+    (is (= #{:prop/left-a :prop/right-only} (set (map :id (:placements result)))))
+    (is (= {:foreground-left 1 :foreground-right 1}
+           (get-in result [:evidence :selected-region-counts])))
+    (is (empty? (get-in result [:evidence :missing-composition-regions])))))
+
+(deftest missing-required-composition-region-fails-closed
+  (let [failure (try
+                  (composition/compose
+                   {:resolved-camera resolved :subject-bounds subject
+                    :candidates [{:id :prop/left :composition-region :foreground-left
+                                  :bounds {:min [-2.5 0.0 -0.2] :max [-2.1 0.7 0.25]}}]
+                    :policy {:required-composition-regions
+                             #{:foreground-left :foreground-right}}})
+                  nil
+                  (catch #?(:clj Exception :cljs js/Error) error error))]
+    (is (= [:foreground-right]
+           (get-in (ex-data failure) [:evidence :missing-composition-regions])))))

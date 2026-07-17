@@ -8,8 +8,9 @@
 
 (def ^:private default-policy
   {:safe-screen-bounds {:min [0.04 0.04] :max [0.96 0.96]}
+   :ground-contact-screen-y-range [0.38 0.92]
    :subject-padding 0.035 :ground-contact-tolerance 0.025
-   :maximum-selected 8})
+   :maximum-selected 8 :required-composition-regions #{}})
 
 (defn- radians [degrees] (* degrees (/ #?(:clj Math/PI :cljs js/Math.PI) 180.0)))
 (defn- v- [a b] (mapv - a b))
@@ -104,6 +105,8 @@
                 (let [screen (project-aabb camera bounds)
                       contact (ground-contact bounds)
                       contact-screen (project-point camera contact)
+                      contact-screen-y (some-> contact-screen :screen second)
+                      ground-band (:ground-contact-screen-y-range policy)
                       ground-error (#?(:clj Math/abs :cljs js/Math.abs) (- (second contact) ground-y))
                       reasons (cond-> []
                                 (nil? screen) (conj :behind-camera)
@@ -118,21 +121,45 @@
                                          (not (within? {:min (:screen contact-screen)
                                                        :max (:screen contact-screen)}
                                                       (:safe-screen-bounds policy)))))
-                                (conj :ground-contact-not-visible))]
-                  {:id id :candidate candidate :screen-bounds screen
+                                (conj :ground-contact-not-visible))
+                      reasons (cond-> reasons
+                                (and contact-screen-y
+                                     (not (<= (first ground-band) contact-screen-y
+                                              (second ground-band))))
+                                (conj :ground-contact-outside-visible-ground-band))]
+                  {:id id :candidate candidate :composition-region (:composition-region candidate)
+                   :screen-bounds screen
                    :ground-contact {:world contact :projection contact-screen :error ground-error}
                    :accepted? (empty? reasons) :reasons reasons}))
               ordered)
-        selected (vec (take (:maximum-selected policy) (filter :accepted? evaluated)))
-        evidence {:valid? (boolean (seq selected)) :candidate-count (count candidates)
+        eligible (vec (filter :accepted? evaluated))
+        required-regions (vec (sort-by pr-str (:required-composition-regions policy)))
+        reserved (vec (keep (fn [region]
+                              (first (filter #(= region (:composition-region %)) eligible)))
+                            required-regions))
+        reserved-ids (set (map :id reserved))
+        fillers (remove #(contains? reserved-ids (:id %)) eligible)
+        selected (vec (take (:maximum-selected policy) (concat reserved fillers)))
+        region-counts (frequencies (keep :composition-region selected))
+        missing-regions (vec (remove #(pos? (get region-counts % 0)) required-regions))
+        evidence {:valid? (and (boolean (seq selected)) (empty? missing-regions))
+                  :candidate-count (count candidates)
                   :selected-count (count selected)
                   :rejected-count (- (count candidates) (count selected))
                   :safe-screen-bounds (:safe-screen-bounds policy)
+                  :ground-contact-screen-y-range (:ground-contact-screen-y-range policy)
+                  :selected-ground-contact-screen-y
+                  (into {} (map (fn [entry]
+                                  [(:id entry) (get-in entry [:ground-contact :projection :screen 1])])
+                                selected))
+                  :required-composition-regions required-regions
+                  :selected-region-counts region-counts
+                  :missing-composition-regions missing-regions
                   :subject-exclusion subject-screen :ground-y ground-y
                   :deterministic-order (mapv :id evaluated)
                   :world-context-retained? true}]
     (when-not (:valid? evidence)
-      (throw (ex-info "Environment composition failed closed: no camera-safe candidate"
+      (throw (ex-info "Environment composition failed closed: unsafe or missing required regions"
                       {:contract contract :evidence evidence :evaluated evaluated})))
     {:contract contract :family family :camera-contract character-camera/contract
      :placements (mapv #(select-keys % [:id :candidate :screen-bounds :ground-contact]) selected)
