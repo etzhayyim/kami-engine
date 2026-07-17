@@ -1,6 +1,7 @@
 (ns kami.render.operator-fit
   "Validated operator pose and attachment transforms for stylized characters."
-  (:require [kami.render.equipment-kit :as equipment]
+  (:require [kami.render.arm-ik :as arm-ik]
+            [kami.render.equipment-kit :as equipment]
             [kami.render.operator-body-mesh :as body]
             [kami.render.weapon-mesh :as weapon]))
 
@@ -87,7 +88,7 @@
         jitter-z (* -0.004 (mod (quot seed 5) 4))
         pi #?(:clj Math/PI :cljs js/Math.PI)
         yaw (* -0.75 pi)
-        position [(+ 0.25 jitter-x) 1.20 (+ -0.75 jitter-z)]
+        position [(+ 0.25 jitter-x) 1.28 (+ -0.57 jitter-z)]
         world (fn [local] (v+ position (rotate-y local yaw)))
         primary (world (get-in weapon/sockets [:primary-grip :position]))
         support (world (get-in weapon/sockets [:support-grip :position]))
@@ -123,7 +124,10 @@
               :when (and a b)]
           {:kind :equipment-equipment :part shoulder-id :other backpack-id
            :gap (aabb-gap a b)})
-        weapon-gaps (for [[body-id body-volume] body-volumes]
+        ;; The rifle is intentionally contacted by solved arms/hands. Clearance
+        ;; gates the core silhouette volumes; arm contact is governed by IK.
+        weapon-gaps (for [[body-id body-volume] body-volumes
+                          :when (contains? #{:head :torso :pelvis} body-id)]
                       {:kind :weapon-body :body body-id
                        :gap (capsule-aabb-gap (:volume weapon) body-volume)})
         constraints (vec (concat mounted-gaps critical-pairs weapon-gaps))
@@ -136,14 +140,20 @@
         area (* tier-scale (+ (:silhouette-area weapon)
                               (reduce + (map :silhouette-area (vals equipment)))))
         occupancy (/ area 1.755)
+        chain-errors (for [[side chain] (:arm-chains fit)
+                           :when (or (not (:valid? chain))
+                                     (> (get-in chain [:metrics :target-error]) 0.025))]
+                       side)
         errors (cond-> []
                  (seq intersections) (conj :clearance)
                  (< grip-separation (:minimum-grip-separation budget)) (conj :grip-readability)
-                 (> occupancy (:maximum-silhouette-occupancy budget)) (conj :silhouette-occupancy))]
+                 (> occupancy (:maximum-silhouette-occupancy budget)) (conj :silhouette-occupancy)
+                 (seq chain-errors) (conj :arm-chain-continuity))]
     {:valid? (empty? errors) :errors errors
      :minimum-clearance minimum-gap :intersections intersections
      :grip-separation grip-separation
      :silhouette-occupancy occupancy
+     :invalid-arm-chains (vec chain-errors)
      :budgets budget
      :constraint-count (count constraints)}))
 
@@ -168,11 +178,21 @@
         weapon (weapon-pose entity-id)
         primary (get-in weapon [:sockets :primary-grip :world-position])
         support (get-in weapon [:sockets :support-grip :world-position])
+        arm-inputs {:right {:family family :side :right
+                            :shoulder [0.36 1.46 0.0] :elbow [0.40 1.10 0.0] :hand [0.40 0.76 0.0]
+                            :target primary :pole [1.0 0.15 0.0]
+                            :upper-length 0.58 :lower-length 0.54}
+                    :left {:family family :side :left
+                           :shoulder [-0.36 1.46 0.0] :elbow [-0.40 1.10 0.0] :hand [-0.40 0.76 0.0]
+                           :target support :pole [-1.0 0.15 0.0]
+                           :upper-length 0.58 :lower-length 0.54}}
+        arm-chains (into {} (map (fn [[side input]] [side (arm-ik/solve input)]) arm-inputs))
         fit {:contract contract :family family :tier tier :entity-id entity-id
              :pose {:semantic :combat/two-hand-aim
                     :joint-targets {:hand-right {:target primary :socket :weapon/grip-primary}
                                     :hand-left {:target support :socket :weapon/grip-support}}
                     :constraints {:look-at :weapon/sight-line :elbows :outward-readable}}
+             :arm-chains arm-chains
              :weapon weapon :equipment enabled
              :body {:contract body/contract :volumes body-volumes}
              :source-contracts {:equipment equipment/contract :weapon weapon/contract
