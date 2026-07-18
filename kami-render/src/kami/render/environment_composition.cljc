@@ -11,7 +11,8 @@
    :ground-contact-screen-y-range [0.38 0.92]
    :subject-padding 0.035 :ground-contact-tolerance 0.025
    :maximum-selected 8 :required-composition-regions #{}
-   :required-composition-region-counts {}})
+   :required-composition-region-counts {}
+   :required-cluster-roles-by-composition-region {}})
 
 (defn- radians [degrees] (* degrees (/ #?(:clj Math/PI :cljs js/Math.PI) 180.0)))
 (defn- v- [a b] (mapv - a b))
@@ -21,6 +22,29 @@
 (defn- normalize [v]
   (let [n (#?(:clj Math/sqrt :cljs js/Math.sqrt) (dot v v))]
     (when (> n 1.0e-9) (mapv #(/ % n) v))))
+
+(defn camera-ground-facing
+  "Return the camera-facing ground-plane orientation for +Z-forward props.
+
+  The direction points from camera look-at toward camera position. Renderer and
+  Studio use this before producing final world AABBs for camera-facing props."
+  [resolved-camera]
+  (when-not (= character-camera/contract (:contract resolved-camera))
+    (throw (ex-info "Ground-facing orientation requires a resolved production camera"
+                    {:expected character-camera/contract :actual (:contract resolved-camera)})))
+  (let [{:keys [position look-at]} (:camera resolved-camera)
+        direction (normalize [(- (nth position 0) (nth look-at 0)) 0.0
+                              (- (nth position 2) (nth look-at 2))])]
+    (when-not direction
+      (throw (ex-info "Camera has no ground-plane facing direction"
+                      {:position position :look-at look-at})))
+    (let [[x _ z] direction
+          yaw (#?(:clj Math/atan2 :cljs js/Math.atan2) x z)
+          half (* 0.5 yaw)]
+      {:direction direction :yaw-radians yaw
+       :rotation [0.0 (#?(:clj Math/sin :cljs js/Math.sin) half) 0.0
+                  (#?(:clj Math/cos :cljs js/Math.cos) half)]
+       :forward-axis :positive-z :plane :ground-xz})))
 
 (defn- corners [{:keys [min max]}]
   (for [x [(nth min 0) (nth max 0)]
@@ -147,6 +171,7 @@
                                               (second ground-band))))
                                 (conj :ground-contact-outside-visible-ground-band))]
                   {:id id :candidate candidate :composition-region (:composition-region candidate)
+                   :cluster-role (:cluster-role candidate)
                    :screen-side screen-side
                    :screen-bounds screen :screen-extent screen-extent
                    :ground-contact-screen-y-range ground-band
@@ -155,14 +180,33 @@
                    :accepted? (empty? reasons) :reasons reasons}))
               ordered)
         eligible (vec (filter :accepted? evaluated))
+        required-roles (:required-cluster-roles-by-composition-region policy)
         required-counts (merge-with max
                                     (zipmap (:required-composition-regions policy) (repeat 1))
-                                    (:required-composition-region-counts policy))
+                                    (:required-composition-region-counts policy)
+                                    (into {} (map (fn [[region roles]] [region (count roles)]))
+                                          required-roles))
         required-regions (vec (sort-by pr-str (keys required-counts)))
-        reserved (vec (mapcat (fn [region]
-                                (take (get required-counts region)
-                                      (filter #(= region (:composition-region %)) eligible)))
-                              required-regions))
+        role-reserved
+        (vec (mapcat (fn [region]
+                       (keep (fn [role]
+                               (first (filter #(and (= region (:composition-region %))
+                                                    (= role (:cluster-role %)))
+                                              eligible)))
+                             (sort-by pr-str (get required-roles region #{}))))
+                     required-regions))
+        role-reserved-ids (set (map :id role-reserved))
+        quota-reserved
+        (vec (mapcat (fn [region]
+                       (let [already (count (filter #(= region (:composition-region %))
+                                                    role-reserved))
+                             remaining (max 0 (- (get required-counts region) already))]
+                         (take remaining
+                               (filter #(and (= region (:composition-region %))
+                                             (not (contains? role-reserved-ids (:id %))))
+                                       eligible))))
+                     required-regions))
+        reserved (vec (concat role-reserved quota-reserved))
         reserved-ids (set (map :id reserved))
         fillers (remove #(contains? reserved-ids (:id %)) eligible)
         selected (vec (take (:maximum-selected policy) (concat reserved fillers)))
@@ -176,7 +220,19 @@
                                          (when (pos? missing) [region missing]))))
                                required-counts)
         missing-regions (vec (keys region-shortages))
-        evidence {:valid? (and (boolean (seq selected)) (empty? missing-regions))
+        selected-role-coverage
+        (into (sorted-map)
+              (for [region (sort-by pr-str (keys required-roles))]
+                [region (set (keep :cluster-role
+                                   (filter #(= region (:composition-region %)) selected)))]))
+        missing-roles
+        (into (sorted-map)
+              (keep (fn [[region roles]]
+                      (let [missing (set (remove (get selected-role-coverage region #{}) roles))]
+                        (when (seq missing) [region missing]))))
+              required-roles)
+        evidence {:valid? (and (boolean (seq selected)) (empty? missing-regions)
+                               (empty? missing-roles))
                   :candidate-count (count candidates)
                   :selected-count (count selected)
                   :rejected-count (count rejected)
@@ -197,6 +253,9 @@
                   :selected-region-counts region-counts
                   :missing-composition-regions missing-regions
                   :composition-region-shortages region-shortages
+                  :required-cluster-roles-by-composition-region required-roles
+                  :selected-cluster-roles-by-composition-region selected-role-coverage
+                  :missing-cluster-roles-by-composition-region missing-roles
                   :subject-exclusion subject-screen :ground-y ground-y
                   :deterministic-order (mapv :id evaluated)
                   :world-context-retained? true}]
@@ -204,6 +263,7 @@
       (throw (ex-info "Environment composition failed closed: unsafe or missing required regions"
                       {:contract contract :evidence evidence :evaluated evaluated})))
     {:contract contract :family family :camera-contract character-camera/contract
+     :camera-ground-facing (camera-ground-facing resolved-camera)
      :placements (mapv #(select-keys % [:id :candidate :screen-bounds :screen-extent
                                         :ground-contact-screen-y-range :screen-extent-range
                                         :ground-contact]) selected)
