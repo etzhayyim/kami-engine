@@ -356,6 +356,15 @@ rectangle-union area, eligible region/anchor semantics, and zero subject overlap
 All thresholds are opt-in policy inputs rather than global style constants, and
 all failures remain evidence-bearing and fail closed.
 
+Composition builds one immutable projection context per call and reuses its
+camera basis, aspect, FOV tangent, and near plane for every candidate corner,
+piece, contact, and facade layer. Eligible candidates are indexed by region
+before deterministic cell, role, diversity, and count reservation. Policy may
+override `:selection-budget`; defaults fail closed above 512 candidates, 4096
+projected pieces, or 128 constraints, with observed counts and limits returned
+as evidence. This bounds hostile/editor-generated inputs without weakening any
+visual gate or changing lexicographic ordering.
+
 Candidates made of disjoint mask islands may supply top-level
 `:bounds-set [{:min [...] :max [...]} ...]` with `:bounds-space :final-world`.
 KAMI then projects each tight island independently and uses only those piece

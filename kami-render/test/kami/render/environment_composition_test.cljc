@@ -494,3 +494,47 @@
     (is (= a b))
     (is (= 2 (count (get-in a [:placements 0 :screen-pieces]))))
     (is (pos? (get-in a [:evidence :projected-union-area])))))
+
+(deftest adversarial-320-candidate-selection-is-bounded-and-fast
+  (let [candidates
+        (vec (for [i (range 320)
+                   :let [side (if (even? i) :left :right)
+                         sign (if (= side :left) -1.0 1.0)
+                         x (* sign (+ 1.5 (* 0.0125 (mod i 80))))
+                         z (+ -2.4 (* 0.06 (quot i 80)))]]
+               {:id (keyword "adversarial" (str i)) :priority (- 1000 i)
+                :composition-region (keyword (str "foreground-" (name side)))
+                :cluster-role (if (zero? (mod i 3)) :vegetation :solid-prop)
+                :kind (nth [:grass :rock :crate] (mod i 3))
+                :geometry-variant (keyword (str "variant-" (mod i 7)))
+                :bounds {:min [(- x 0.16) 0.0 z]
+                         :max [(+ x 0.16) 0.45 (+ z 0.20)]}}))
+        policy {:maximum-selected 8
+                :required-composition-region-counts
+                {:foreground-left 3 :foreground-right 3}
+                :required-cluster-roles-by-composition-region
+                {:foreground-left #{:vegetation :solid-prop}
+                 :foreground-right #{:vegetation :solid-prop}}
+                :required-diversity-by-composition-region
+                {:foreground-left {:kind 2 :geometry-variant 2}
+                 :foreground-right {:kind 2 :geometry-variant 2}}}
+        started #?(:clj (System/nanoTime) :cljs 0)
+        result (composition/compose {:resolved-camera resolved :subject-bounds subject
+                                     :candidates candidates :policy policy})
+        elapsed-ms #?(:clj (/ (- (System/nanoTime) started) 1.0e6) :cljs 0)]
+    (is (= 320 (get-in result [:evidence :selection-budget :candidate-count])))
+    (is (= 8 (count (:placements result))))
+    ;; Includes projection + deterministic selection; generous relative to 250ms core goal.
+    #?(:clj (is (< elapsed-ms 2000.0)) :cljs (is true))))
+
+(deftest selection-budget-fails-closed-before-unbounded-projection
+  (let [candidates (vec (for [i (range 513)]
+                          {:id (keyword "over-budget" (str i))
+                           :bounds {:min [2.0 0.0 0.0] :max [2.2 0.3 0.2]}}))
+        failure (try
+                  (composition/compose {:resolved-camera resolved :subject-bounds subject
+                                        :candidates candidates})
+                  nil (catch #?(:clj Exception :cljs js/Error) error error))]
+    (is (= 513 (get-in (ex-data failure) [:selection-budget :candidate-count])))
+    (is (= 512 (get-in (ex-data failure)
+                       [:selection-budget :limits :maximum-candidates])))))
