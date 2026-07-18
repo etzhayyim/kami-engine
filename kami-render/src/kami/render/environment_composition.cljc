@@ -19,6 +19,10 @@
    :minimum-projected-union-area-by-composition-region {}
    :required-diversity-by-composition-region {}})
 
+(def ^:private default-selection-budget
+  {:maximum-candidates 512 :maximum-projected-pieces 4096
+   :maximum-constraints 128})
+
 (defn- radians [degrees] (* degrees (/ #?(:clj Math/PI :cljs js/Math.PI) 180.0)))
 (defn- v- [a b] (mapv - a b))
 (defn- dot [a b] (reduce + (map * a b)))
@@ -80,6 +84,31 @@
             ndc-y (/ (dot relative up) (* depth tan-half))]
         {:screen [(+ 0.5 (* 0.5 ndc-x)) (- 0.5 (* 0.5 ndc-y))]
          :depth depth :in-front? true}))))
+
+(defn- projection-context [camera]
+  (merge (camera-basis camera)
+         {:position (:position camera) :near (:near camera)
+          :aspect (/ (double (get-in camera [:viewport :width]))
+                     (double (get-in camera [:viewport :height])))
+          :tan-half (#?(:clj Math/tan :cljs js/Math.tan)
+                     (* 0.5 (radians (:vertical-fov-deg camera))))}))
+
+(defn- project-point* [{:keys [position forward right up near aspect tan-half]} point]
+  (let [relative (v- point position) depth (dot relative forward)]
+    (when (> depth near)
+      {:screen [(+ 0.5 (* 0.5 (/ (dot relative right) (* depth tan-half aspect))))
+                (- 0.5 (* 0.5 (/ (dot relative up) (* depth tan-half))))]
+       :depth depth :in-front? true})))
+
+(defn- project-aabb* [projection bounds]
+  (let [projected (mapv #(project-point* projection %) (corners bounds))]
+    (when (every? some? projected)
+      (let [points (map :screen projected)
+            mn (reduce #(mapv min %1 %2) [##Inf ##Inf] points)
+            mx (reduce #(mapv max %1 %2) [##-Inf ##-Inf] points)]
+        {:min mn :max mx :corners projected
+         :depth-range [(apply min (map :depth projected))
+                       (apply max (map :depth projected))]}))))
 
 (defn project-aabb
   "Project all eight AABB corners; returns nil if any corner is behind the near plane."
@@ -163,13 +192,13 @@
           (recur (rest remaining) (conj result candidate) (conj values value))
           (recur (rest remaining) result values))))))
 
-(defn- facade-readability-evidence [camera subject-screen selected policy]
+(defn- facade-readability-evidence [projection subject-screen selected policy]
   (when policy
     (let [minimum-extent (:minimum-layer-extent policy 0.0)
           maximum-overlap (:maximum-subject-overlap policy 0.0)
           layers (vec (for [entry selected
                             layer (get-in entry [:candidate :facade-layer-bounds])
-                            :let [screen (project-aabb camera (:bounds layer))
+                            :let [screen (project-aabb* projection (:bounds layer))
                                   extent (when screen
                                            (max (- (get-in screen [:max 0]) (get-in screen [:min 0]))
                                                 (- (get-in screen [:max 1]) (get-in screen [:min 1]))))
@@ -256,23 +285,41 @@
                     {:render-selection (:render-selection resolved-camera)})))
   (let [policy (merge default-policy policy)
         camera (:camera resolved-camera)
-        subject-screen (some-> (project-aabb camera subject-bounds)
+        projection (projection-context camera)
+        subject-screen (some-> (project-aabb* projection subject-bounds)
                                (pad-rect (:subject-padding policy)))
         _ (when-not subject-screen
             (throw (ex-info "Environment composition cannot project subject bounds"
                             {:subject-bounds subject-bounds})))
         required-cells (:required-screen-occupancy-cells-by-composition-region policy)
         all-required-cells (set (mapcat identity (vals required-cells)))
+        selection-budget (merge default-selection-budget (:selection-budget policy))
+        candidate-count (count candidates)
+        projected-piece-count (reduce + 0 (map #(max 1 (count (:bounds-set %))) candidates))
+        constraint-count (+ (reduce + 0 (map count (vals required-cells)))
+                            (reduce + 0 (map count (vals (:required-cluster-roles-by-composition-region policy))))
+                            (reduce + 0 (map count (vals (:required-diversity-by-composition-region policy))))
+                            (count (:required-composition-region-counts policy))
+                            (if (:facade-readability policy) 1 0)
+                            (if (:hero-junction-road-layer policy) 1 0))
+        budget-evidence {:candidate-count candidate-count
+                         :projected-piece-count projected-piece-count
+                         :constraint-count constraint-count :limits selection-budget}
+        _ (when (or (> candidate-count (:maximum-candidates selection-budget))
+                    (> projected-piece-count (:maximum-projected-pieces selection-budget))
+                    (> constraint-count (:maximum-constraints selection-budget)))
+            (throw (ex-info "Environment composition failed closed: selection budget exceeded"
+                            {:contract contract :selection-budget budget-evidence})))
         ordered (sort-by (juxt #( - (or (:priority %) 0)) #(pr-str (:id %))) candidates)
         evaluated
         (mapv (fn [{:keys [id bounds] :as candidate}]
                 (let [piece-bounds (vec (or (seq (:bounds-set candidate)) [bounds]))
-                      projected-pieces (mapv #(project-aabb camera %) piece-bounds)
+                      projected-pieces (mapv #(project-aabb* projection %) piece-bounds)
                       screen-pieces (vec (keep identity projected-pieces))
                       all-in-front? (= (count piece-bounds) (count screen-pieces))
                       screen (when all-in-front? (enclose-rects screen-pieces))
                       contacts (mapv ground-contact piece-bounds)
-                      contact-screens (mapv #(project-point camera %) contacts)
+                      contact-screens (mapv #(project-point* projection %) contacts)
                       contact-screen (first contact-screens)
                       contact-screen-y (some-> contact-screen :screen second)
                       ground-band (or (:ground-contact-screen-y-range candidate)
@@ -348,6 +395,7 @@
                    :accepted? (empty? reasons) :reasons reasons}))
               ordered)
         eligible (vec (filter :accepted? evaluated))
+        eligible-by-region (group-by :composition-region eligible)
         required-roles (:required-cluster-roles-by-composition-region policy)
         required-counts (merge-with max
                                     (zipmap (:required-composition-regions policy) (repeat 1))
@@ -360,7 +408,7 @@
                        (keep (fn [cell]
                                (first (filter #(and (= region (:composition-region %))
                                                     (contains? (:occupied-screen-cells %) cell))
-                                              eligible)))
+                                              (get eligible-by-region region []))))
                              (sort-by pr-str (get required-cells region #{}))))
                      (sort-by pr-str (keys required-cells))))
         cell-reserved-ids (set (map :id cell-reserved))
@@ -373,14 +421,15 @@
                                  (first (filter #(and (= region (:composition-region %))
                                                       (= role (:cluster-role %))
                                                       (not (contains? cell-reserved-ids (:id %))))
-                                                eligible))))
+                                                (get eligible-by-region region [])))))
                              (sort-by pr-str (get required-roles region #{}))))
                      required-regions))
         semantic-reserved (vec (distinct (concat cell-reserved role-reserved)))
         diversity-reserved
         (reduce (fn [reserved [region requirements]]
                   (reduce (fn [r [attribute required]]
-                            (reserve-distinct eligible r region attribute required))
+                            (reserve-distinct (get eligible-by-region region [])
+                                              r region attribute required))
                           reserved (sort-by (comp pr-str key) requirements)))
                 semantic-reserved
                 (sort-by (comp pr-str key) (:required-diversity-by-composition-region policy)))
@@ -393,7 +442,7 @@
                          (take remaining
                                (filter #(and (= region (:composition-region %))
                                              (not (contains? semantic-reserved-ids (:id %))))
-                                       eligible))))
+                                       (get eligible-by-region region [])))))
                      required-regions))
         reserved (vec (concat diversity-reserved quota-reserved))
         reserved-ids (set (map :id reserved))
@@ -467,7 +516,7 @@
                       (let [missing (- minimum (get region-union-areas region 0.0))]
                         (when (pos? missing) [region missing]))))
               (:minimum-projected-union-area-by-composition-region policy))
-        facade-evidence (facade-readability-evidence camera subject-screen selected
+        facade-evidence (facade-readability-evidence projection subject-screen selected
                                                        (:facade-readability policy))
         road-evidence (road-layer-evidence subject-screen selected
                                            (:hero-junction-road-layer policy))
@@ -514,6 +563,7 @@
                   :projected-union-area-shortage area-shortage
                   :projected-union-area-shortages-by-composition-region region-area-shortages
                   :facade-readability facade-evidence :hero-junction-road-layer road-evidence
+                  :selection-budget budget-evidence
                   :subject-exclusion subject-screen :ground-y ground-y
                   :deterministic-order (mapv :id evaluated)
                   :world-context-retained? true}]
