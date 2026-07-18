@@ -141,6 +141,12 @@
      :max [(/ (inc col) (double cols)) (/ (inc row) (double rows))]}))
 
 (defn- rect-center [{:keys [min max]}] (mapv #(* 0.5 (+ %1 %2)) min max))
+(defn- enclose-rects [rects]
+  (when (seq rects)
+    {:min [(apply min (map #(get-in % [:min 0]) rects))
+           (apply min (map #(get-in % [:min 1]) rects))]
+     :max [(apply max (map #(get-in % [:max 0]) rects))
+           (apply max (map #(get-in % [:max 1]) rects))]}))
 (defn- distance2 [a b]
   (#?(:clj Math/sqrt :cljs js/Math.sqrt) (reduce + (map (fn [x y] (let [d (- x y)] (* d d))) a b))))
 
@@ -195,11 +201,14 @@
           layers (vec (for [entry selected
                             :let [eligibility (get-in entry [:candidate :attachment-eligibility])
                                   screen (:screen-bounds entry)
-                                  overlap (intersection-area screen subject-screen)
+                                  overlap (reduce + 0.0
+                                                  (map #(intersection-area % subject-screen)
+                                                       (:screen-pieces entry)))
                                   center-y (second (rect-center screen))]
                             :when (= (:required-target policy :road-surface) (:target eligibility))]
                         {:id (:id entry) :material-role (get-in entry [:candidate :material-role])
-                         :screen-bounds screen :subject-overlap overlap
+                         :screen-bounds screen :screen-pieces (:screen-pieces entry)
+                         :subject-overlap overlap
                          :center-y center-y :eligibility eligibility
                          :safe? (and (:subject-exclusion-required? eligibility)
                                      (= (:required-space policy :neighborhood-world)
@@ -212,7 +221,7 @@
                                      (<= (first y-range) center-y (second y-range)))}))
           safe (vec (filter :safe? layers))
           roles (set (keep :material-role safe))
-          union-area (rect-union-area (map :screen-bounds safe))
+          union-area (rect-union-area (mapcat :screen-pieces safe))
           valid? (and (>= (count safe) (:required-layer-count policy 0))
                       (>= (count roles) (:required-material-role-count policy 0))
                       (>= union-area (:minimum-union-area policy 0.0)))]
@@ -257,17 +266,26 @@
         ordered (sort-by (juxt #( - (or (:priority %) 0)) #(pr-str (:id %))) candidates)
         evaluated
         (mapv (fn [{:keys [id bounds] :as candidate}]
-                (let [screen (project-aabb camera bounds)
-                      contact (ground-contact bounds)
-                      contact-screen (project-point camera contact)
+                (let [piece-bounds (vec (or (seq (:bounds-set candidate)) [bounds]))
+                      projected-pieces (mapv #(project-aabb camera %) piece-bounds)
+                      screen-pieces (vec (keep identity projected-pieces))
+                      all-in-front? (= (count piece-bounds) (count screen-pieces))
+                      screen (when all-in-front? (enclose-rects screen-pieces))
+                      contacts (mapv ground-contact piece-bounds)
+                      contact-screens (mapv #(project-point camera %) contacts)
+                      contact-screen (first contact-screens)
                       contact-screen-y (some-> contact-screen :screen second)
                       ground-band (or (:ground-contact-screen-y-range candidate)
                                       (:ground-contact-screen-y-range policy))
                       screen-extent (when screen
-                                      (max (- (get-in screen [:max 0]) (get-in screen [:min 0]))
-                                           (- (get-in screen [:max 1]) (get-in screen [:min 1]))))
+                                      (apply max
+                                             (for [piece screen-pieces]
+                                               (max (- (get-in piece [:max 0]) (get-in piece [:min 0]))
+                                                    (- (get-in piece [:max 1]) (get-in piece [:min 1]))))))
                       extent-range (:screen-extent-range candidate)
-                      ground-error (#?(:clj Math/abs :cljs js/Math.abs) (- (second contact) ground-y))
+                      ground-errors (mapv #(#?(:clj Math/abs :cljs js/Math.abs)
+                                              (- (second %) ground-y)) contacts)
+                      ground-error (apply max ground-errors)
                       screen-side (:screen-side candidate)
                       side-valid? (case screen-side
                                     nil true
@@ -277,10 +295,14 @@
                                                             (get-in subject-screen [:max 0])))
                                     false)
                       reasons (cond-> []
-                                (nil? screen) (conj :behind-camera)
-                                (and screen (not (within? screen (:safe-screen-bounds policy))))
+                                (not all-in-front?) (conj :behind-camera)
+                                (and (seq (:bounds-set candidate))
+                                     (not= :final-world (:bounds-space candidate)))
+                                (conj :bounds-set-space-invalid)
+                                (and screen (not-every? #(within? % (:safe-screen-bounds policy))
+                                                        screen-pieces))
                                 (conj :outside-safe-screen)
-                                (and screen (intersects? screen subject-screen))
+                                (and screen (some #(intersects? % subject-screen) screen-pieces))
                                 (conj :subject-exclusion)
                                 (and screen-extent extent-range
                                      (not (<= (first extent-range) screen-extent
@@ -289,34 +311,40 @@
                                 (not side-valid?) (conj :screen-side-mismatch)
                                 (> ground-error (:ground-contact-tolerance policy))
                                 (conj :not-grounded)
-                                (or (nil? contact-screen)
-                                    (and contact-screen
-                                         (not (within? {:min (:screen contact-screen)
-                                                       :max (:screen contact-screen)}
-                                                      (:safe-screen-bounds policy)))))
+                                (or (some nil? contact-screens)
+                                    (some #(not (within? {:min (:screen %) :max (:screen %)}
+                                                         (:safe-screen-bounds policy)))
+                                          (keep identity contact-screens)))
                                 (conj :ground-contact-not-visible))
                       reasons (cond-> reasons
-                                (and contact-screen-y
-                                     (not (<= (first ground-band) contact-screen-y
-                                              (second ground-band))))
+                                (some (fn [projected]
+                                        (let [y (some-> projected :screen second)]
+                                          (and y (not (<= (first ground-band) y
+                                                          (second ground-band))))))
+                                      contact-screens)
                                 (conj :ground-contact-outside-visible-ground-band))]
                   {:id id :candidate candidate :composition-region (:composition-region candidate)
                    :cluster-role (:cluster-role candidate)
                    :kind (:kind candidate) :geometry-variant (:geometry-variant candidate)
                    :screen-side screen-side
-                   :screen-bounds screen :screen-extent screen-extent
-                   :screen-area (if screen (rect-area screen) 0.0)
+                   :screen-bounds screen :screen-pieces screen-pieces
+                   :screen-extent screen-extent
+                   :screen-area (if screen (rect-union-area screen-pieces) 0.0)
                    :occupied-screen-cells
                    (set (for [cell all-required-cells
                               :when (and screen
-                                         (pos? (intersection-area screen
-                                                                  (screen-cell-rect
-                                                                   (:screen-occupancy-grid policy)
-                                                                   cell))))]
+                                         (some #(pos? (intersection-area
+                                                       % (screen-cell-rect
+                                                          (:screen-occupancy-grid policy) cell)))
+                                               screen-pieces))]
                           cell))
                    :ground-contact-screen-y-range ground-band
                    :screen-extent-range extent-range
-                   :ground-contact {:world contact :projection contact-screen :error ground-error}
+                   :ground-contact {:world (first contacts) :projection contact-screen
+                                    :error ground-error}
+                   :ground-contacts (mapv (fn [world projection error]
+                                            {:world world :projection projection :error error})
+                                          contacts contact-screens ground-errors)
                    :accepted? (empty? reasons) :reasons reasons}))
               ordered)
         eligible (vec (filter :accepted? evaluated))
@@ -425,12 +453,13 @@
                         (when (seq shortages) [region shortages]))))
               (:required-diversity-by-composition-region policy))
         aggregate-area (reduce + 0.0 (map :screen-area selected))
-        union-area (rect-union-area (map :screen-bounds selected))
+        union-area (rect-union-area (mapcat :screen-pieces selected))
         region-union-areas
         (into (sorted-map)
               (for [region (sort-by pr-str (set (keep :composition-region selected)))]
-                [region (rect-union-area (map :screen-bounds
-                                              (filter #(= region (:composition-region %)) selected)))]))
+                [region (rect-union-area
+                         (mapcat :screen-pieces
+                                 (filter #(= region (:composition-region %)) selected)))]))
         area-shortage (max 0.0 (- (:minimum-projected-union-area policy) union-area))
         region-area-shortages
         (into (sorted-map)
@@ -493,12 +522,14 @@
                       {:contract contract :evidence evidence :evaluated evaluated})))
     {:contract contract :family family :camera-contract character-camera/contract
      :camera-ground-facing (camera-ground-facing resolved-camera)
-     :placements (mapv #(select-keys % [:id :candidate :screen-bounds :screen-extent
+     :placements (mapv #(select-keys % [:id :candidate :screen-bounds :screen-pieces
+                                        :screen-extent
                                         :ground-contact-screen-y-range :screen-extent-range
-                                        :ground-contact]) selected)
-     :rejected (mapv #(select-keys % [:id :reasons :screen-bounds :screen-extent
+                                        :ground-contact :ground-contacts]) selected)
+     :rejected (mapv #(select-keys % [:id :reasons :screen-bounds :screen-pieces
+                                      :screen-extent
                                       :ground-contact-screen-y-range :screen-extent-range
-                                      :ground-contact])
+                                      :ground-contact :ground-contacts])
                      rejected)
      :unselected-safe (mapv :id unselected-safe)
      :render-selection {:world {:mode :preserve-all :removed? false}

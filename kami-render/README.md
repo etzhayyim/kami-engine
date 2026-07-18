@@ -356,6 +356,14 @@ rectangle-union area, eligible region/anchor semantics, and zero subject overlap
 All thresholds are opt-in policy inputs rather than global style constants, and
 all failures remain evidence-bearing and fail closed.
 
+Candidates made of disjoint mask islands may supply top-level
+`:bounds-set [{:min [...] :max [...]} ...]` with `:bounds-space :final-world`.
+KAMI then projects each tight island independently and uses only those piece
+rectangles for safe-screen checks, subject exclusion, occupancy, extent, and
+union coverage. A retained coarse `:bounds` is debug/legacy data and cannot
+create false subject overlap; candidate identity and deterministic selection
+remain singular. Any actual overlapping island still rejects.
+
 Enabled equipment includes the adjusted transform plus its original mesh intent
 and attachment semantic, so a consumer applies the result without duplicating
 KAMI offsets. Entity-stable micro-variation is applied only inside validated
