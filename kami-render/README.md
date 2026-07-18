@@ -314,6 +314,14 @@ For density targets, `:required-composition-region-counts` reserves the exact N
 per region (for example three left, three right, and one building) before the
 same priority fill. Evidence reports required counts, selected counts, and exact
 per-region shortages.
+
+`:required-cluster-roles-by-composition-region` adds semantic coverage inside
+each region quota. The selector reserves one accepted candidate for every
+required role (for example `:vegetation` and `:solid-prop`) before filling the
+remaining N by priority. Only candidates that already pass projection, side,
+ground-band, extent, and subject-exclusion checks can satisfy a role. Evidence
+reports selected and missing role sets per region, and any missing role fails
+closed instead of allowing high-priority solids to starve vegetation.
 Evidence reports selected region counts and missing regions; missing coverage
 fails closed, preventing a dense left or right candidate set from starving the
 opposite foreground slot.

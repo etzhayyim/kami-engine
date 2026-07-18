@@ -1,7 +1,8 @@
 (ns kami.render.environment-composition-test
   (:require [clojure.test :refer [deftest is]]
             [kami.render.character-camera :as camera]
-            [kami.render.environment-composition :as composition]))
+            [kami.render.environment-composition :as composition]
+            [kotoba.render.foreground-density :as foreground-density]))
 
 (def subject {:min [-0.62 0.0 -0.45] :max [0.62 2.08 0.45]})
 (def resolved (camera/resolve-camera {:subject-id :operator/hero :subject-bounds subject
@@ -229,26 +230,47 @@
     (is (> (:screen-extent (first (filter #(= :prop/oversized (:id %)) evaluated))) 0.05))))
 
 (deftest render-grass-descriptor-contract-accepts-eleven-percent-extent
-  (let [grass {:id :grass/right-0 :composition-region :foreground-right
-               :screen-side :right :cluster-id :cluster/right-0
-               :cluster-role :vegetation
-               :ground-contact-screen-y-range [0.58 0.90]
-               :screen-extent-range [0.025 0.11]
-               ;; Final world AABB after Render descriptor offset and world-size scale.
-               :bounds {:min [2.1 0.0 -0.2] :max [2.6 0.6 0.3]}}
+  (let [production-subject {:min [-0.78 0.0 -0.62] :max [0.78 1.75 0.62]}
+        production-camera (camera/resolve-camera
+                           {:family :stylized :subject-id 1 :orbit :three-quarter-left
+                            :subject-bounds production-subject :ground-y 0.0
+                            :viewport {:width 1280 :height 720}
+                            :policy {:target-coverage 0.35 :vertical-fov-deg 42.0
+                                     :head-safe-margin 0.12 :feet-safe-margin 0.12}})
+        {[fx _ fz] :direction} (composition/camera-ground-facing production-camera)
+        kit (foreground-density/foreground-kit
+             {:family :stylized :tier :hero :entity-id :royale-camera-foreground
+              :seed 26071812 :origin [8.0 0.0 0.0] :radius 6.0 :ground-y 0.0
+              :camera-facing-direction [fx fz]})
+        descriptor (first (filter #(= :foreground-grass-17 (:descriptor/id %))
+                                  (get-in kit [:camera-zones :foreground])))
+        [x y z] (get-in descriptor [:transform :offset])
+        [width height depth] (get-in descriptor [:transform :scale])
+        grass (-> (select-keys descriptor [:composition-region :screen-side :cluster-id
+                                           :cluster-role :ground-contact-screen-y-range
+                                           :screen-extent-range])
+                  (assoc :id (:descriptor/id descriptor)
+                         ;; Render normalized-unit + world-size final AABB semantics.
+                         :bounds {:min [(- x (* 0.5 width)) y (- z (* 0.5 depth))]
+                                  :max [(+ x (* 0.5 width)) (+ y height)
+                                        (+ z (* 0.5 depth))]}))
         result (composition/compose
-                {:resolved-camera resolved :subject-bounds subject :candidates [grass]
-                 :policy {:required-composition-region-counts {:foreground-right 1}}})
+                {:resolved-camera production-camera :subject-bounds production-subject
+                 :candidates [grass]
+                 :policy {:required-composition-region-counts
+                          {(:composition-region grass) 1}}})
         placement (first (:placements result))
         extent (:screen-extent placement)
         contact-y (get-in placement [:ground-contact :projection :screen 1])]
-    ;; Both values are calculated from the final world AABB by compose/project-aabb,
-    ;; not copied from descriptor intent.
+    ;; Exact kotoba-lang/render bb9ddc4 Royale origin-5 descriptor. Both values
+    ;; are calculated from the final world AABB, not copied from descriptor intent.
+    (is (< (Math/abs (double (+ fx 0.573576436351046))) 1.0e-9))
+    (is (< (Math/abs (double (+ fz 0.8191520442889919))) 1.0e-9))
     (is (<= 0.025 extent 0.11))
     (is (<= 0.58 contact-y 0.90))
-    (is (= :cluster/right-0 (get-in placement [:candidate :cluster-id])))
+    (is (= (:cluster-id descriptor) (get-in placement [:candidate :cluster-id])))
     (is (= :vegetation (get-in placement [:candidate :cluster-role])))
-    (is (= {:foreground-right 1}
+    (is (= {(:composition-region grass) 1}
            (get-in result [:evidence :selected-region-counts])))))
 
 (deftest camera-ground-facing-comes-from-resolved-orbit-not-hardcoded-z
@@ -271,3 +293,47 @@
                                            :bounds {:min [2.1 0.0 -0.2]
                                                     :max [2.6 0.6 0.3]}}]})
                            [:camera-ground-facing])))))
+
+(deftest region-quota-reserves-required-cluster-roles-before-priority-fill
+  (let [candidate (fn [id side role priority x]
+                    {:id id :priority priority :screen-side side :cluster-role role
+                     :composition-region (keyword (str "foreground-" (name side)))
+                     :bounds {:min [x 0.0 0.0] :max [(+ x 0.24) 0.5 0.2]}})
+        candidates [(candidate :left/solid-a :left :solid-prop 100 -2.8)
+                    (candidate :left/solid-b :left :solid-prop 90 -2.4)
+                    (candidate :left/solid-c :left :solid-prop 80 -2.0)
+                    (candidate :left/vegetation :left :vegetation 1 -3.2)
+                    (candidate :right/solid :right :solid-prop 50 2.0)
+                    (candidate :right/vegetation :right :vegetation 2 2.4)]
+        required {:foreground-left #{:vegetation :solid-prop}
+                  :foreground-right #{:vegetation :solid-prop}}
+        result (composition/compose
+                {:resolved-camera resolved :subject-bounds subject :candidates candidates
+                 :policy {:maximum-selected 6
+                          :required-composition-region-counts
+                          {:foreground-left 3 :foreground-right 2}
+                          :required-cluster-roles-by-composition-region required}})]
+    (is (= required (get-in result [:evidence
+                                    :selected-cluster-roles-by-composition-region])))
+    (is (empty? (get-in result [:evidence
+                                :missing-cluster-roles-by-composition-region])))
+    (is (contains? (set (map :id (:placements result))) :left/vegetation))))
+
+(deftest required-cluster-role-shortage-fails-closed-with-exact-evidence
+  (let [failure (try
+                  (composition/compose
+                   {:resolved-camera resolved :subject-bounds subject
+                    :candidates [{:id :left/solid :screen-side :left
+                                  :cluster-role :solid-prop
+                                  :composition-region :foreground-left
+                                  :bounds {:min [-2.5 0.0 0.0] :max [-2.2 0.5 0.2]}}]
+                    :policy {:required-composition-region-counts {:foreground-left 2}
+                             :required-cluster-roles-by-composition-region
+                             {:foreground-left #{:vegetation :solid-prop}}}})
+                  nil
+                  (catch #?(:clj Exception :cljs js/Error) error error))]
+    (is (= {:foreground-left #{:vegetation}}
+           (get-in (ex-data failure)
+                   [:evidence :missing-cluster-roles-by-composition-region])))
+    (is (= {:foreground-left 1}
+           (get-in (ex-data failure) [:evidence :composition-region-shortages])))))
