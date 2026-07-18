@@ -455,3 +455,42 @@
     (is (:valid? road-evidence))
     (is (= 2 (:safe-layer-count road-evidence) (:material-role-count road-evidence)))
     (is (>= (:union-area road-evidence) 0.040))))
+
+(deftest disjoint-bounds-set-islands-do-not-inherit-coarse-subject-overlap
+  (let [candidate {:id :road/disjoint :bounds-space :final-world
+                   ;; Debug/enclosing AABB crosses the subject and must not be projected.
+                   :bounds {:min [-2.5 0.0 -0.2] :max [2.5 0.1 0.2]}
+                   :bounds-set [{:min [-2.5 0.0 -0.2] :max [-1.5 0.1 0.2]}
+                                {:min [1.5 0.0 -0.2] :max [2.5 0.1 0.2]}]}
+        result (composition/compose {:resolved-camera resolved :subject-bounds subject
+                                     :candidates [candidate]})
+        placement (first (:placements result))]
+    (is (= :road/disjoint (:id placement)))
+    (is (= 2 (count (:screen-pieces placement))))
+    (is (pos? (get-in result [:evidence :projected-union-area])))
+    (is (not (some #{:subject-exclusion} (mapcat :reasons (:rejected result)))))))
+
+(deftest actual-overlapping-bounds-set-piece-rejects
+  (let [candidate {:id :road/overlap :bounds-space :final-world
+                   :bounds {:min [-2.5 0.0 -0.2] :max [2.5 0.1 0.2]}
+                   :bounds-set [{:min [-2.5 0.0 -0.2] :max [-1.5 0.1 0.2]}
+                                {:min [-0.2 0.0 -0.2] :max [0.2 0.1 0.2]}]}
+        failure (try (composition/compose {:resolved-camera resolved
+                                           :subject-bounds subject
+                                           :candidates [candidate]})
+                     nil (catch #?(:clj Exception :cljs js/Error) error error))]
+    (is (some #{:subject-exclusion} (get-in (ex-data failure) [:evaluated 0 :reasons])))))
+
+(deftest bounds-set-projection-remains-piece-exact-under-rotated-camera
+  (let [rotated (camera/resolve-camera {:subject-bounds subject :orbit :three-quarter-right})
+        candidate {:id :road/rotated-islands :bounds-space :final-world
+                   :bounds {:min [1.5 0.0 0.5] :max [4.0 0.1 2.0]}
+                   :bounds-set [{:min [1.5 0.0 0.5] :max [2.0 0.1 1.0]}
+                                {:min [3.5 0.0 1.5] :max [4.0 0.1 2.0]}]}
+        a (composition/compose {:resolved-camera rotated :subject-bounds subject
+                                :candidates [candidate]})
+        b (composition/compose {:resolved-camera rotated :subject-bounds subject
+                                :candidates [candidate]})]
+    (is (= a b))
+    (is (= 2 (count (get-in a [:placements 0 :screen-pieces]))))
+    (is (pos? (get-in a [:evidence :projected-union-area])))))
