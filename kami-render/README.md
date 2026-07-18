@@ -337,6 +337,25 @@ by `:maximum-selected` as `:unselected-safe-count` and `:unselected-safe` ids.
 Thus selected, rejected, and safe-truncated counts exactly partition the input
 candidate count without labeling capacity overflow as a geometry failure.
 
+### Measurable composition gates
+
+Environment composition can reserve actually projected occupancy cells with
+`:required-screen-occupancy-cells-by-composition-region` on a configurable
+`:screen-occupancy-grid`. It reports exact rectangle-union area globally and per
+region (alongside overlap-inflated aggregate area), and gates minimum union area
+without allowing stacked props to fake coverage. Attribute diversity policy can
+require distinct `:kind` and `:geometry-variant` values per region; deterministic
+reservation occurs before count fill and shortages are explicit.
+
+Building candidates may provide final-world `:facade-layer-bounds` entries with
+`:id`, `:role`, and `:bounds`. `:facade-readability` measures projected layer
+extent, distinct roles, pairwise center separation, and subject overlap. Hero
+junction road layers use final-world `:bounds`, `:material-role`, and separate
+`:attachment-eligibility`; the road gate measures lower-half layer/role counts,
+rectangle-union area, eligible region/anchor semantics, and zero subject overlap.
+All thresholds are opt-in policy inputs rather than global style constants, and
+all failures remain evidence-bearing and fail closed.
+
 Enabled equipment includes the adjusted transform plus its original mesh intent
 and attachment semantic, so a consumer applies the result without duplicating
 KAMI offsets. Entity-stable micro-variation is applied only inside validated

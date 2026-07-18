@@ -337,3 +337,121 @@
                    [:evidence :missing-cluster-roles-by-composition-region])))
     (is (= {:foreground-left 1}
            (get-in (ex-data failure) [:evidence :composition-region-shortages])))))
+
+(defn- measurable-candidate [side index]
+  (let [x (* (if (= side :left) -1.0 1.0) (+ 1.8 (* index 0.35)))]
+    {:id (keyword (name side) (str index))
+     :composition-region (keyword (str "foreground-" (name side)))
+     :screen-side side :cluster-role (if (even? index) :vegetation :solid-prop)
+     :kind (if (even? index) :grass :rock)
+     :geometry-variant (keyword (str "variant-" index))
+     :ground-contact-screen-y-range [0.68 0.86]
+     :bounds {:min [(- x 0.3) 0.0 -2.5] :max [(+ x 0.3) 0.8 -1.9]}}))
+
+(def measurable-policy
+  {:maximum-selected 6
+   :required-composition-region-counts {:foreground-left 3 :foreground-right 3}
+   :required-screen-occupancy-cells-by-composition-region
+   {:foreground-left #{:lower-left} :foreground-right #{:lower-right}}
+   :minimum-projected-union-area 0.040
+   :minimum-projected-union-area-by-composition-region
+   {:foreground-left 0.018 :foreground-right 0.018}
+   :required-diversity-by-composition-region
+   {:foreground-left {:kind 2 :geometry-variant 2}
+    :foreground-right {:kind 2 :geometry-variant 2}}})
+
+(deftest measurable-occupancy-area-and-diversity-gates-use-actual-projection
+  (let [candidates (vec (concat (map #(measurable-candidate :left %) (range 3))
+                                (map #(measurable-candidate :right %) (range 3))))
+        result (composition/compose {:resolved-camera resolved :subject-bounds subject
+                                     :candidates candidates :policy measurable-policy})
+        evidence (:evidence result)]
+    (is (= {:foreground-left #{:lower-left} :foreground-right #{:lower-right}}
+           (:selected-screen-occupancy-cells-by-composition-region evidence)))
+    (is (>= (:projected-union-area evidence) 0.040))
+    (is (every? #(>= % 0.018)
+                (vals (:projected-union-area-by-composition-region evidence))))
+    (is (= 2 (count (get-in evidence [:selected-diversity-by-composition-region
+                                      :foreground-left :kind]))))
+    (is (empty? (:diversity-shortages-by-composition-region evidence)))))
+
+(deftest occupancy-and-diversity-shortages-fail-closed-exactly
+  (let [only-left [(assoc (measurable-candidate :left 0) :geometry-variant :same)
+                   (assoc (measurable-candidate :left 2) :geometry-variant :same)]
+        failure (try
+                  (composition/compose {:resolved-camera resolved :subject-bounds subject
+                                        :candidates only-left :policy measurable-policy})
+                  nil (catch #?(:clj Exception :cljs js/Error) error error))
+        evidence (:evidence (ex-data failure))]
+    (is (= {:foreground-right #{:lower-right}}
+           (:missing-screen-occupancy-cells-by-composition-region evidence)))
+    (is (pos? (get-in evidence [:diversity-shortages-by-composition-region
+                                :foreground-left :kind])))
+    (is (pos? (get-in evidence [:projected-union-area-shortages-by-composition-region
+                                :foreground-right])))))
+
+(deftest projected-area-evidence-remains-deterministic-under-rotated-camera
+  (let [rotated (camera/resolve-camera {:subject-bounds subject :orbit :three-quarter-left})
+        candidate {:id :rotated/context
+                   :bounds {:min [-3.0 0.0 0.5] :max [-1.5 1.0 1.5]}}
+        a (composition/compose {:resolved-camera rotated :subject-bounds subject
+                                :candidates [candidate]})
+        b (composition/compose {:resolved-camera rotated :subject-bounds subject
+                                :candidates [candidate]})]
+    (is (= a b))
+    (is (pos? (get-in a [:evidence :projected-union-area])))
+    (is (<= (get-in a [:evidence :projected-union-area])
+            (get-in a [:evidence :aggregate-projected-area])))))
+
+(deftest facade-readability-measures-layers-separation-and-subject-occlusion
+  (let [building {:id :building/readable :composition-region :environment-building
+                  :bounds {:min [2.0 0.0 4.5] :max [4.0 3.0 5.5]}
+                  :facade-layer-bounds
+                  [{:id :facade/base :role :facade-base
+                    :bounds {:min [2.1 0.3 4.45] :max [3.9 0.8 4.55]}}
+                   {:id :facade/trim :role :facade-trim
+                    :bounds {:min [2.1 1.2 4.44] :max [3.9 1.5 4.54]}}
+                   {:id :facade/window :role :facade-window
+                    :bounds {:min [2.5 1.8 4.43] :max [3.5 2.5 4.53]}}]}
+        policy {:facade-readability {:required-layer-count 3 :required-distinct-roles 3
+                                     :minimum-layer-extent 0.025
+                                     :minimum-layer-separation 0.012
+                                     :maximum-subject-overlap 0.0}}
+        result (composition/compose {:resolved-camera resolved :subject-bounds subject
+                                     :candidates [building] :policy policy})
+        facade (get-in result [:evidence :facade-readability])]
+    (is (:valid? facade))
+    (is (= 3 (:readable-layer-count facade) (:distinct-role-count facade)))
+    (is (>= (:minimum-layer-separation facade) 0.012)))
+  (let [bad {:id :building/unreadable :bounds {:min [2.0 0.0 4.5] :max [4.0 3.0 5.5]}
+             :facade-layer-bounds [{:id :only :role :facade-base
+                                    :bounds {:min [2.1 0.3 4.45] :max [2.2 0.35 4.5]}}]}
+        failure (try (composition/compose
+                      {:resolved-camera resolved :subject-bounds subject :candidates [bad]
+                       :policy {:facade-readability {:required-layer-count 3
+                                                    :required-distinct-roles 3
+                                                    :minimum-layer-extent 0.025}}})
+                     nil (catch #?(:clj Exception :cljs js/Error) error error))]
+    (is (false? (get-in (ex-data failure) [:evidence :facade-readability :valid?])))))
+
+(deftest hero-junction-road-layer-mask-is-lower-half-and-subject-safe
+  (let [eligibility {:target :road-surface :space :neighborhood-world
+                     :anchor :junction-center :subject-exclusion-required? true
+                     :eligible-regions #{:junction-center}}
+        road (fn [id role x0 x1]
+               {:id id :composition-region :junction-center :material-role role
+                :attachment-eligibility eligibility
+                :bounds {:min [x0 0.0 -2.7] :max [x1 0.08 -1.2]}})
+        candidates [(road :road/wear :road-edge-wear -3.4 -0.9)
+                    (road :road/patch :road-patch 0.9 3.4)]
+        policy {:hero-junction-road-layer {:required-layer-count 2
+                                           :required-material-role-count 2
+                                           :minimum-union-area 0.040
+                                           :screen-y-range [0.5 1.0]
+                                           :maximum-subject-overlap 0.0}}
+        result (composition/compose {:resolved-camera resolved :subject-bounds subject
+                                     :candidates candidates :policy policy})
+        road-evidence (get-in result [:evidence :hero-junction-road-layer])]
+    (is (:valid? road-evidence))
+    (is (= 2 (:safe-layer-count road-evidence) (:material-role-count road-evidence)))
+    (is (>= (:union-area road-evidence) 0.040))))

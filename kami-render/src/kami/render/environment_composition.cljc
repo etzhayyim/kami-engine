@@ -12,7 +12,12 @@
    :subject-padding 0.035 :ground-contact-tolerance 0.025
    :maximum-selected 8 :required-composition-regions #{}
    :required-composition-region-counts {}
-   :required-cluster-roles-by-composition-region {}})
+   :required-cluster-roles-by-composition-region {}
+   :screen-occupancy-grid [4 4]
+   :required-screen-occupancy-cells-by-composition-region {}
+   :minimum-projected-union-area 0.0
+   :minimum-projected-union-area-by-composition-region {}
+   :required-diversity-by-composition-region {}})
 
 (defn- radians [degrees] (* degrees (/ #?(:clj Math/PI :cljs js/Math.PI) 180.0)))
 (defn- v- [a b] (mapv - a b))
@@ -98,6 +103,129 @@
   (every? true? (map (fn [amn amx bmn bmx] (and (<= amn bmx) (<= bmn amx)))
                      a-min a-max b-min b-max)))
 
+(defn- rect-area [{mn :min mx :max}]
+  (* (max 0.0 (- (first mx) (first mn)))
+     (max 0.0 (- (second mx) (second mn)))))
+
+(defn- intersection-area [{a-min :min a-max :max} {b-min :min b-max :max}]
+  (* (max 0.0 (- (min (first a-max) (first b-max))
+                   (max (first a-min) (first b-min))))
+     (max 0.0 (- (min (second a-max) (second b-max))
+                   (max (second a-min) (second b-min))))))
+
+(defn- rect-union-area [rects]
+  (let [xs (sort (distinct (mapcat (juxt #(get-in % [:min 0]) #(get-in % [:max 0])) rects)))]
+    (reduce
+     + 0.0
+     (for [[x0 x1] (partition 2 1 xs)
+           :when (< x0 x1)
+           :let [intervals (sort-by first
+                                    (for [r rects
+                                          :when (and (< (get-in r [:min 0]) x1)
+                                                     (> (get-in r [:max 0]) x0))]
+                                      [(get-in r [:min 1]) (get-in r [:max 1])]))
+                 merged (reduce (fn [{:keys [end total]} [a b]]
+                                  (if (> a end)
+                                    {:end b :total (+ total (- b a))}
+                                    {:end (max end b)
+                                     :total (+ total (max 0.0 (- b end)))}))
+                                {:end ##-Inf :total 0.0} intervals)]]
+       (* (- x1 x0) (:total merged))))))
+
+(defn- screen-cell-rect [[cols rows] cell]
+  (let [[col row] (case cell
+                    :lower-left [0 (dec rows)]
+                    :lower-right [(dec cols) (dec rows)]
+                    cell)]
+    {:min [(/ col (double cols)) (/ row (double rows))]
+     :max [(/ (inc col) (double cols)) (/ (inc row) (double rows))]}))
+
+(defn- rect-center [{:keys [min max]}] (mapv #(* 0.5 (+ %1 %2)) min max))
+(defn- distance2 [a b]
+  (#?(:clj Math/sqrt :cljs js/Math.sqrt) (reduce + (map (fn [x y] (let [d (- x y)] (* d d))) a b))))
+
+(defn- reserve-distinct [eligible reserved region attribute required]
+  (loop [remaining eligible result (vec reserved)
+         values (set (keep #(get-in % [:candidate attribute])
+                           (filter #(= region (:composition-region %)) reserved)))]
+    (if (or (>= (count values) required) (empty? remaining))
+      result
+      (let [candidate (first remaining) value (get-in candidate [:candidate attribute])]
+        (if (and (= region (:composition-region candidate)) value
+                 (not (contains? values value))
+                 (not (some #(= (:id candidate) (:id %)) result)))
+          (recur (rest remaining) (conj result candidate) (conj values value))
+          (recur (rest remaining) result values))))))
+
+(defn- facade-readability-evidence [camera subject-screen selected policy]
+  (when policy
+    (let [minimum-extent (:minimum-layer-extent policy 0.0)
+          maximum-overlap (:maximum-subject-overlap policy 0.0)
+          layers (vec (for [entry selected
+                            layer (get-in entry [:candidate :facade-layer-bounds])
+                            :let [screen (project-aabb camera (:bounds layer))
+                                  extent (when screen
+                                           (max (- (get-in screen [:max 0]) (get-in screen [:min 0]))
+                                                (- (get-in screen [:max 1]) (get-in screen [:min 1]))))
+                                  overlap (if screen (intersection-area screen subject-screen) 0.0)]]
+                        (assoc layer :candidate-id (:id entry) :screen-bounds screen
+                               :screen-extent extent :subject-overlap overlap
+                               :readable? (and screen (>= extent minimum-extent)
+                                               (<= overlap maximum-overlap)))))
+          readable (vec (filter :readable? layers))
+          centers (mapv #(rect-center (:screen-bounds %)) readable)
+          separations (for [i (range (count centers)) j (range (inc i) (count centers))]
+                        (distance2 (nth centers i) (nth centers j)))
+          minimum-separation (if (seq separations) (apply min separations) ##Inf)
+          roles (set (keep :role readable))
+          valid? (and (>= (count readable) (:required-layer-count policy 0))
+                      (>= (count roles) (:required-distinct-roles policy 0))
+                      (>= minimum-separation (:minimum-layer-separation policy 0.0)))]
+      {:valid? valid? :layer-count (count layers) :readable-layer-count (count readable)
+       :distinct-roles roles :distinct-role-count (count roles)
+       :minimum-layer-separation minimum-separation
+       :required-layer-count (:required-layer-count policy 0)
+       :required-distinct-roles (:required-distinct-roles policy 0)
+       :minimum-layer-extent minimum-extent :maximum-subject-overlap maximum-overlap
+       :layers layers})))
+
+(defn- road-layer-evidence [subject-screen selected policy]
+  (when policy
+    (let [y-range (:screen-y-range policy [0.5 1.0])
+          layers (vec (for [entry selected
+                            :let [eligibility (get-in entry [:candidate :attachment-eligibility])
+                                  screen (:screen-bounds entry)
+                                  overlap (intersection-area screen subject-screen)
+                                  center-y (second (rect-center screen))]
+                            :when (= (:required-target policy :road-surface) (:target eligibility))]
+                        {:id (:id entry) :material-role (get-in entry [:candidate :material-role])
+                         :screen-bounds screen :subject-overlap overlap
+                         :center-y center-y :eligibility eligibility
+                         :safe? (and (:subject-exclusion-required? eligibility)
+                                     (= (:required-space policy :neighborhood-world)
+                                        (:space eligibility))
+                                     (= (:required-anchor policy :junction-center)
+                                        (:anchor eligibility))
+                                     (contains? (:eligible-regions eligibility)
+                                                (:composition-region entry))
+                                     (<= overlap (:maximum-subject-overlap policy 0.0))
+                                     (<= (first y-range) center-y (second y-range)))}))
+          safe (vec (filter :safe? layers))
+          roles (set (keep :material-role safe))
+          union-area (rect-union-area (map :screen-bounds safe))
+          valid? (and (>= (count safe) (:required-layer-count policy 0))
+                      (>= (count roles) (:required-material-role-count policy 0))
+                      (>= union-area (:minimum-union-area policy 0.0)))]
+      {:valid? valid? :layer-count (count layers) :safe-layer-count (count safe)
+       :material-roles roles :material-role-count (count roles) :union-area union-area
+       :required-layer-count (:required-layer-count policy 0)
+       :required-material-role-count (:required-material-role-count policy 0)
+       :minimum-union-area (:minimum-union-area policy 0.0) :screen-y-range y-range
+       :required-target (:required-target policy :road-surface)
+       :required-space (:required-space policy :neighborhood-world)
+       :required-anchor (:required-anchor policy :junction-center)
+       :layers layers})))
+
 (defn- ground-contact [{:keys [min max]}]
   [(* 0.5 (+ (nth min 0) (nth max 0))) (nth min 1)
    (* 0.5 (+ (nth min 2) (nth max 2)))])
@@ -124,6 +252,8 @@
         _ (when-not subject-screen
             (throw (ex-info "Environment composition cannot project subject bounds"
                             {:subject-bounds subject-bounds})))
+        required-cells (:required-screen-occupancy-cells-by-composition-region policy)
+        all-required-cells (set (mapcat identity (vals required-cells)))
         ordered (sort-by (juxt #( - (or (:priority %) 0)) #(pr-str (:id %))) candidates)
         evaluated
         (mapv (fn [{:keys [id bounds] :as candidate}]
@@ -172,8 +302,18 @@
                                 (conj :ground-contact-outside-visible-ground-band))]
                   {:id id :candidate candidate :composition-region (:composition-region candidate)
                    :cluster-role (:cluster-role candidate)
+                   :kind (:kind candidate) :geometry-variant (:geometry-variant candidate)
                    :screen-side screen-side
                    :screen-bounds screen :screen-extent screen-extent
+                   :screen-area (if screen (rect-area screen) 0.0)
+                   :occupied-screen-cells
+                   (set (for [cell all-required-cells
+                              :when (and screen
+                                         (pos? (intersection-area screen
+                                                                  (screen-cell-rect
+                                                                   (:screen-occupancy-grid policy)
+                                                                   cell))))]
+                          cell))
                    :ground-contact-screen-y-range ground-band
                    :screen-extent-range extent-range
                    :ground-contact {:world contact :projection contact-screen :error ground-error}
@@ -187,26 +327,47 @@
                                     (into {} (map (fn [[region roles]] [region (count roles)]))
                                           required-roles))
         required-regions (vec (sort-by pr-str (keys required-counts)))
+        cell-reserved
+        (vec (mapcat (fn [region]
+                       (keep (fn [cell]
+                               (first (filter #(and (= region (:composition-region %))
+                                                    (contains? (:occupied-screen-cells %) cell))
+                                              eligible)))
+                             (sort-by pr-str (get required-cells region #{}))))
+                     (sort-by pr-str (keys required-cells))))
+        cell-reserved-ids (set (map :id cell-reserved))
         role-reserved
         (vec (mapcat (fn [region]
                        (keep (fn [role]
-                               (first (filter #(and (= region (:composition-region %))
-                                                    (= role (:cluster-role %)))
-                                              eligible)))
+                               (when-not (some #(and (= region (:composition-region %))
+                                                     (= role (:cluster-role %)))
+                                               cell-reserved)
+                                 (first (filter #(and (= region (:composition-region %))
+                                                      (= role (:cluster-role %))
+                                                      (not (contains? cell-reserved-ids (:id %))))
+                                                eligible))))
                              (sort-by pr-str (get required-roles region #{}))))
                      required-regions))
-        role-reserved-ids (set (map :id role-reserved))
+        semantic-reserved (vec (distinct (concat cell-reserved role-reserved)))
+        diversity-reserved
+        (reduce (fn [reserved [region requirements]]
+                  (reduce (fn [r [attribute required]]
+                            (reserve-distinct eligible r region attribute required))
+                          reserved (sort-by (comp pr-str key) requirements)))
+                semantic-reserved
+                (sort-by (comp pr-str key) (:required-diversity-by-composition-region policy)))
+        semantic-reserved-ids (set (map :id diversity-reserved))
         quota-reserved
         (vec (mapcat (fn [region]
                        (let [already (count (filter #(= region (:composition-region %))
-                                                    role-reserved))
+                                                    diversity-reserved))
                              remaining (max 0 (- (get required-counts region) already))]
                          (take remaining
                                (filter #(and (= region (:composition-region %))
-                                             (not (contains? role-reserved-ids (:id %))))
+                                             (not (contains? semantic-reserved-ids (:id %))))
                                        eligible))))
                      required-regions))
-        reserved (vec (concat role-reserved quota-reserved))
+        reserved (vec (concat diversity-reserved quota-reserved))
         reserved-ids (set (map :id reserved))
         fillers (remove #(contains? reserved-ids (:id %)) eligible)
         selected (vec (take (:maximum-selected policy) (concat reserved fillers)))
@@ -231,8 +392,62 @@
                       (let [missing (set (remove (get selected-role-coverage region #{}) roles))]
                         (when (seq missing) [region missing]))))
               required-roles)
+        selected-cell-coverage
+        (into (sorted-map)
+              (for [region (sort-by pr-str (keys required-cells))]
+                [region (set (mapcat :occupied-screen-cells
+                                     (filter #(= region (:composition-region %)) selected)))]))
+        missing-cells
+        (into (sorted-map)
+              (keep (fn [[region cells]]
+                      (let [missing (set (remove (get selected-cell-coverage region #{}) cells))]
+                        (when (seq missing) [region missing]))))
+              required-cells)
+        diversity-coverage
+        (into (sorted-map)
+              (for [[region requirements] (:required-diversity-by-composition-region policy)]
+                [region
+                 (into (sorted-map)
+                       (for [[attribute _] requirements]
+                         [attribute
+                          (set (keep #(get-in % [:candidate attribute])
+                                     (filter #(= region (:composition-region %)) selected)))]))]))
+        diversity-shortages
+        (into (sorted-map)
+              (keep (fn [[region requirements]]
+                      (let [shortages (into (sorted-map)
+                                            (keep (fn [[attribute required]]
+                                                    (let [missing (- required
+                                                                     (count (get-in diversity-coverage
+                                                                                    [region attribute] #{})))]
+                                                      (when (pos? missing) [attribute missing]))))
+                                            requirements)]
+                        (when (seq shortages) [region shortages]))))
+              (:required-diversity-by-composition-region policy))
+        aggregate-area (reduce + 0.0 (map :screen-area selected))
+        union-area (rect-union-area (map :screen-bounds selected))
+        region-union-areas
+        (into (sorted-map)
+              (for [region (sort-by pr-str (set (keep :composition-region selected)))]
+                [region (rect-union-area (map :screen-bounds
+                                              (filter #(= region (:composition-region %)) selected)))]))
+        area-shortage (max 0.0 (- (:minimum-projected-union-area policy) union-area))
+        region-area-shortages
+        (into (sorted-map)
+              (keep (fn [[region minimum]]
+                      (let [missing (- minimum (get region-union-areas region 0.0))]
+                        (when (pos? missing) [region missing]))))
+              (:minimum-projected-union-area-by-composition-region policy))
+        facade-evidence (facade-readability-evidence camera subject-screen selected
+                                                       (:facade-readability policy))
+        road-evidence (road-layer-evidence subject-screen selected
+                                           (:hero-junction-road-layer policy))
         evidence {:valid? (and (boolean (seq selected)) (empty? missing-regions)
-                               (empty? missing-roles))
+                               (empty? missing-roles) (empty? missing-cells)
+                               (empty? diversity-shortages) (zero? area-shortage)
+                               (empty? region-area-shortages)
+                               (or (nil? facade-evidence) (:valid? facade-evidence))
+                               (or (nil? road-evidence) (:valid? road-evidence)))
                   :candidate-count (count candidates)
                   :selected-count (count selected)
                   :rejected-count (count rejected)
@@ -256,6 +471,20 @@
                   :required-cluster-roles-by-composition-region required-roles
                   :selected-cluster-roles-by-composition-region selected-role-coverage
                   :missing-cluster-roles-by-composition-region missing-roles
+                  :screen-occupancy-grid (:screen-occupancy-grid policy)
+                  :required-screen-occupancy-cells-by-composition-region required-cells
+                  :selected-screen-occupancy-cells-by-composition-region selected-cell-coverage
+                  :missing-screen-occupancy-cells-by-composition-region missing-cells
+                  :required-diversity-by-composition-region
+                  (:required-diversity-by-composition-region policy)
+                  :selected-diversity-by-composition-region diversity-coverage
+                  :diversity-shortages-by-composition-region diversity-shortages
+                  :aggregate-projected-area aggregate-area :projected-union-area union-area
+                  :minimum-projected-union-area (:minimum-projected-union-area policy)
+                  :projected-union-area-by-composition-region region-union-areas
+                  :projected-union-area-shortage area-shortage
+                  :projected-union-area-shortages-by-composition-region region-area-shortages
+                  :facade-readability facade-evidence :hero-junction-road-layer road-evidence
                   :subject-exclusion subject-screen :ground-y ground-y
                   :deterministic-order (mapv :id evaluated)
                   :world-context-retained? true}]
