@@ -250,3 +250,24 @@
     (is (= :vegetation (get-in placement [:candidate :cluster-role])))
     (is (= {:foreground-right 1}
            (get-in result [:evidence :selected-region-counts])))))
+
+(deftest camera-ground-facing-comes-from-resolved-orbit-not-hardcoded-z
+  (let [front (composition/camera-ground-facing resolved)
+        rotated-camera (camera/resolve-camera {:subject-bounds subject
+                                               :orbit :three-quarter-right})
+        rotated (composition/camera-ground-facing rotated-camera)
+        [_ qy _ qw] (:rotation rotated)
+        rotated-positive-z [(* 2.0 qy qw) 0.0 (- 1.0 (* 2.0 qy qy))]]
+    (is (< (Math/abs (double (first (:direction front)))) 1.0e-9))
+    (is (< (Math/abs (double (+ 1.0 (nth (:direction front) 2)))) 1.0e-9))
+    (is (> (first (:direction rotated)) 0.50))
+    (is (< (nth (:direction rotated) 2) -0.75))
+    (is (not= (:rotation front) (:rotation rotated)))
+    (is (every? #(< (Math/abs (double %)) 1.0e-9)
+                (map - rotated-positive-z (:direction rotated))))
+    (is (= rotated (get-in (composition/compose
+                            {:resolved-camera rotated-camera :subject-bounds subject
+                             :candidates [{:id :prop/right
+                                           :bounds {:min [2.1 0.0 -0.2]
+                                                    :max [2.6 0.6 0.3]}}]})
+                           [:camera-ground-facing])))))

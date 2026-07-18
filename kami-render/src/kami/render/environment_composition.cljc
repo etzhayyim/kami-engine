@@ -22,6 +22,29 @@
   (let [n (#?(:clj Math/sqrt :cljs js/Math.sqrt) (dot v v))]
     (when (> n 1.0e-9) (mapv #(/ % n) v))))
 
+(defn camera-ground-facing
+  "Return the camera-facing ground-plane orientation for +Z-forward props.
+
+  The direction points from camera look-at toward camera position. Renderer and
+  Studio use this before producing final world AABBs for camera-facing props."
+  [resolved-camera]
+  (when-not (= character-camera/contract (:contract resolved-camera))
+    (throw (ex-info "Ground-facing orientation requires a resolved production camera"
+                    {:expected character-camera/contract :actual (:contract resolved-camera)})))
+  (let [{:keys [position look-at]} (:camera resolved-camera)
+        direction (normalize [(- (nth position 0) (nth look-at 0)) 0.0
+                              (- (nth position 2) (nth look-at 2))])]
+    (when-not direction
+      (throw (ex-info "Camera has no ground-plane facing direction"
+                      {:position position :look-at look-at})))
+    (let [[x _ z] direction
+          yaw (#?(:clj Math/atan2 :cljs js/Math.atan2) x z)
+          half (* 0.5 yaw)]
+      {:direction direction :yaw-radians yaw
+       :rotation [0.0 (#?(:clj Math/sin :cljs js/Math.sin) half) 0.0
+                  (#?(:clj Math/cos :cljs js/Math.cos) half)]
+       :forward-axis :positive-z :plane :ground-xz})))
+
 (defn- corners [{:keys [min max]}]
   (for [x [(nth min 0) (nth max 0)]
         y [(nth min 1) (nth max 1)]
@@ -204,6 +227,7 @@
       (throw (ex-info "Environment composition failed closed: unsafe or missing required regions"
                       {:contract contract :evidence evidence :evaluated evaluated})))
     {:contract contract :family family :camera-contract character-camera/contract
+     :camera-ground-facing (camera-ground-facing resolved-camera)
      :placements (mapv #(select-keys % [:id :candidate :screen-bounds :screen-extent
                                         :ground-contact-screen-y-range :screen-extent-range
                                         :ground-contact]) selected)

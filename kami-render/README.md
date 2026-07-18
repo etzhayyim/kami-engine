@@ -282,6 +282,13 @@ ground-contact point inside the production lower-frame band (default normalized
 screen Y `0.38–0.92`). Public `project-point` and `project-aabb` functions expose
 the identical projection contract to renderer and Studio tooling.
 
+`camera-ground-facing` derives an XZ unit direction, yaw, and Y-axis quaternion
+from the resolved camera look-at toward its position for +Z-forward props.
+Camera-facing vegetation and other asymmetric footprints must use this result
+before producing their final world AABB; a hardcoded -Z orientation is valid
+only for the front orbit and fails three-quarter shots. `compose` echoes the
+same orientation for renderer/Studio evidence.
+
 Individual descriptors may override the band with top-level
 `:ground-contact-screen-y-range`; this allows a background building base around
 Y `0.47` while requiring foreground props at Y `0.58` or lower in frame. Optional
