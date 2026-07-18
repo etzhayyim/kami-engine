@@ -227,3 +227,26 @@
     (is (every? #(some #{:screen-extent-outside-range} (:reasons %)) evaluated))
     (is (< (:screen-extent (first (filter #(= :prop/tiny (:id %)) evaluated))) 0.05))
     (is (> (:screen-extent (first (filter #(= :prop/oversized (:id %)) evaluated))) 0.05))))
+
+(deftest render-grass-descriptor-contract-accepts-eleven-percent-extent
+  (let [grass {:id :grass/right-0 :composition-region :foreground-right
+               :screen-side :right :cluster-id :cluster/right-0
+               :cluster-role :vegetation
+               :ground-contact-screen-y-range [0.58 0.90]
+               :screen-extent-range [0.025 0.11]
+               ;; Final world AABB after Render descriptor offset and world-size scale.
+               :bounds {:min [2.1 0.0 -0.2] :max [2.6 0.6 0.3]}}
+        result (composition/compose
+                {:resolved-camera resolved :subject-bounds subject :candidates [grass]
+                 :policy {:required-composition-region-counts {:foreground-right 1}}})
+        placement (first (:placements result))
+        extent (:screen-extent placement)
+        contact-y (get-in placement [:ground-contact :projection :screen 1])]
+    ;; Both values are calculated from the final world AABB by compose/project-aabb,
+    ;; not copied from descriptor intent.
+    (is (<= 0.025 extent 0.11))
+    (is (<= 0.58 contact-y 0.90))
+    (is (= :cluster/right-0 (get-in placement [:candidate :cluster-id])))
+    (is (= :vegetation (get-in placement [:candidate :cluster-role])))
+    (is (= {:foreground-right 1}
+           (get-in result [:evidence :selected-region-counts])))))
