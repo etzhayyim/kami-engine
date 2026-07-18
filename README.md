@@ -28,6 +28,9 @@ here.
   surfaces.
 - `kami-web/`, `kami-web-modelb/`, and shader/data assets remain as web-facing
   non-Rust fixtures.
+- `kami.render.capture-lifecycle` consumes WebGPU's authoritative
+  `:kotoba.webgpu/capture-presence-evidence-v2` queue-submit evidence schema
+  (WebGPU merge `247ae4b`); adapters must not rename or synthesize this value.
 
 ## Verify
 

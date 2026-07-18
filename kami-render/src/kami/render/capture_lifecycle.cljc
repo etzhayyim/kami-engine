@@ -4,6 +4,9 @@
             [kami.render.environment-composition :as composition]))
 
 (def contract :kotoba.render/production-capture-lifecycle-v1)
+(def capture-presence-schema
+  "Authoritative WebGPU queue-submit evidence schema (WebGPU merge 247ae4b)."
+  :kotoba.webgpu/capture-presence-evidence-v2)
 (def default-policy
   {:stable-frames 3 :transform-epsilon 1.0e-9
    :timeout-ms 5000
@@ -132,8 +135,7 @@
               evidence (presence-evidence resolved bounds transform (:policy state))
               submission-valid?
               (or (not (get-in state [:policy :require-submitted-presence?]))
-                  (and (= :kotoba.webgpu/submitted-subject-presence-v2
-                          (:schema submitted-subject-presence))
+                  (and (= capture-presence-schema (:schema submitted-subject-presence))
                        (true? (:submitted? submitted-subject-presence))
                        (contains? (set (:entity-ids submitted-subject-presence)) subject-id)
                        (pos? (:draw-count submitted-subject-presence 0))))]

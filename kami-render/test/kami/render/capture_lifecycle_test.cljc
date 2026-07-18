@@ -15,7 +15,7 @@
                                         :subject-transform transform
                                         :submitted-render-frame-count (inc tick)
                                         :submitted-subject-presence
-                                        {:schema :kotoba.webgpu/submitted-subject-presence-v2
+                                        {:schema lifecycle/capture-presence-schema
                                          :submitted? true :submit-sequence tick
                                          :entity-ids #{:operator/hero}
                                          :submitted-roles #{:subject/skinned}
@@ -84,3 +84,18 @@
                                   state (range 3))))
     (is (= :timeout (:state (lifecycle/timeout state 5000))))
     (is (false? (:frozen? (lifecycle/timeout state 5000))))))
+
+(deftest non-authoritative-webgpu-presence-schema-fails-closed
+  (let [bad-presence {:schema :kotoba.webgpu/submitted-subject-presence-v2
+                      :submitted? true :entity-ids #{:operator/hero} :draw-count 1}]
+    (is (= :kotoba.webgpu/capture-presence-evidence-v2
+           lifecycle/capture-presence-schema))
+    (is (thrown-with-msg?
+         #?(:clj Exception :cljs js/Error) #"presence failed closed"
+         (reduce (fn [state tick]
+                   (lifecycle/snapshot-tick
+                    state {:tick tick :subject-id :operator/hero
+                           :subject-transform {:position [0.0 0.0 0.0]}
+                           :submitted-render-frame-count (inc tick)
+                           :submitted-subject-presence bad-presence}))
+                 (requested) (range 3))))))
