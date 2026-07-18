@@ -142,6 +142,12 @@
      (max 0.0 (- (min (second a-max) (second b-max))
                    (max (second a-min) (second b-min))))))
 
+(defn- intersection-rect [{a-min :min a-max :max} {b-min :min b-max :max}]
+  (let [mn [(max (first a-min) (first b-min)) (max (second a-min) (second b-min))]
+        mx [(min (first a-max) (first b-max)) (min (second a-max) (second b-max))]]
+    (when (and (< (first mn) (first mx)) (< (second mn) (second mx)))
+      {:min mn :max mx})))
+
 (defn- rect-union-area [rects]
   (let [xs (sort (distinct (mapcat (juxt #(get-in % [:min 0]) #(get-in % [:max 0])) rects)))]
     (reduce
@@ -191,6 +197,67 @@
                  (not (some #(= (:id candidate) (:id %)) result)))
           (recur (rest remaining) (conj result candidate) (conj values value))
           (recur (rest remaining) result values))))))
+
+(defn- union-of [entries]
+  (rect-union-area (mapcat :screen-pieces entries)))
+
+(defn- incremental-union-gain [selected-pieces candidate]
+  (let [intersections (keep identity
+                            (for [candidate-piece (:screen-pieces candidate)
+                                  selected-piece selected-pieces]
+                              (intersection-rect candidate-piece selected-piece)))]
+    (max 0.0 (- (:screen-area candidate) (rect-union-area intersections)))))
+
+(defn- coverage-fill [selected candidates count]
+  (loop [chosen (vec selected)
+         selected-pieces (vec (mapcat :screen-pieces selected))
+         remaining (vec candidates)
+         slots count]
+    (if (or (zero? slots) (empty? remaining))
+      chosen
+      (let [best (reduce (fn [winner candidate]
+                           (let [gain (incremental-union-gain selected-pieces candidate)]
+                             (if (or (nil? winner) (> gain (:gain winner)))
+                               {:candidate candidate :gain gain} winner)))
+                         nil remaining)
+            id (get-in best [:candidate :id])]
+        (recur (conj chosen (:candidate best))
+               (into selected-pieces (:screen-pieces (:candidate best)))
+               (vec (remove #(= id (:id %)) remaining))
+               (dec slots))))))
+
+(defn- region-constraints-valid? [selected region policy]
+  (let [entries (filter #(= region (:composition-region %)) selected)
+        cells (set (mapcat :occupied-screen-cells entries))
+        roles (set (keep :cluster-role entries))]
+    (and (every? cells (get-in policy [:required-screen-occupancy-cells-by-composition-region
+                                       region] #{}))
+         (every? roles (get-in policy [:required-cluster-roles-by-composition-region
+                                       region] #{}))
+         (every? (fn [[attribute required]]
+                   (>= (count (set (keep #(get-in % [:candidate attribute]) entries))) required))
+                 (get-in policy [:required-diversity-by-composition-region region] {})))))
+
+(defn- optimize-region-coverage [selected eligible region policy maximum-swaps target-area]
+  (loop [current (vec selected) swaps 0]
+    (let [region-selected (vec (filter #(= region (:composition-region %)) current))
+          selected-ids (set (map :id current))
+          alternatives (remove #(contains? selected-ids (:id %)) eligible)
+          base (union-of region-selected)
+          best (when (< base target-area)
+                 (reduce
+                (fn [winner [out replacement]]
+                  (let [trial (mapv #(if (= (:id %) (:id out)) replacement %) current)
+                        trial-region (filter #(= region (:composition-region %)) trial)
+                        gain (- (union-of trial-region) base)]
+                    (if (and (> gain 1.0e-12) (region-constraints-valid? trial region policy)
+                             (or (nil? winner) (> gain (:gain winner))))
+                      {:selected trial :gain gain :out (:id out) :in (:id replacement)} winner)))
+                nil (for [out region-selected replacement alternatives] [out replacement])))]
+      (if (and best (< swaps maximum-swaps))
+        (recur (:selected best) (inc swaps))
+        {:selected current :swap-count swaps :exhausted? (nil? best)
+         :best-union-area (union-of (filter #(= region (:composition-region %)) current))}))))
 
 (defn- facade-readability-evidence [projection subject-screen selected policy]
   (when policy
@@ -311,6 +378,7 @@
             (throw (ex-info "Environment composition failed closed: selection budget exceeded"
                             {:contract contract :selection-budget budget-evidence})))
         ordered (sort-by (juxt #( - (or (:priority %) 0)) #(pr-str (:id %))) candidates)
+        ordered-index (into {} (map-indexed (fn [index candidate] [(:id candidate) index]) ordered))
         evaluated
         (mapv (fn [{:keys [id bounds] :as candidate}]
                 (let [piece-bounds (vec (or (seq (:bounds-set candidate)) [bounds]))
@@ -436,18 +504,35 @@
         semantic-reserved-ids (set (map :id diversity-reserved))
         quota-reserved
         (vec (mapcat (fn [region]
-                       (let [already (count (filter #(= region (:composition-region %))
-                                                    diversity-reserved))
+                       (let [current (vec (filter #(= region (:composition-region %))
+                                                  diversity-reserved))
+                             already (count current)
                              remaining (max 0 (- (get required-counts region) already))]
-                         (take remaining
-                               (filter #(and (= region (:composition-region %))
-                                             (not (contains? semantic-reserved-ids (:id %))))
-                                       (get eligible-by-region region [])))))
+                         (remove #(contains? semantic-reserved-ids (:id %))
+                                 (coverage-fill current
+                                                (filter #(not (contains? semantic-reserved-ids
+                                                                         (:id %)))
+                                                        (get eligible-by-region region []))
+                                                remaining))))
                      required-regions))
         reserved (vec (concat diversity-reserved quota-reserved))
         reserved-ids (set (map :id reserved))
         fillers (remove #(contains? reserved-ids (:id %)) eligible)
-        selected (vec (take (:maximum-selected policy) (concat reserved fillers)))
+        initially-selected (coverage-fill reserved fillers
+                                          (max 0 (- (:maximum-selected policy)
+                                                    (count reserved))))
+        coverage-regions (sort-by pr-str
+                                  (keys (:minimum-projected-union-area-by-composition-region policy)))
+        optimization
+        (reduce (fn [{:keys [selected regions]} region]
+                  (let [result (optimize-region-coverage
+                                selected (get eligible-by-region region []) region policy
+                                (get-in policy [:coverage-selection-budget :maximum-swaps-per-region] 16)
+                                (get-in policy [:minimum-projected-union-area-by-composition-region
+                                                region] 0.0))]
+                    {:selected (:selected result) :regions (assoc regions region (dissoc result :selected))}))
+                {:selected initially-selected :regions (sorted-map)} coverage-regions)
+        selected (vec (sort-by #(get ordered-index (:id %) ##Inf) (:selected optimization)))
         selected-ids (set (map :id selected))
         rejected (vec (remove :accepted? evaluated))
         unselected-safe (vec (remove #(contains? selected-ids (:id %)) eligible))
@@ -562,6 +647,13 @@
                   :projected-union-area-by-composition-region region-union-areas
                   :projected-union-area-shortage area-shortage
                   :projected-union-area-shortages-by-composition-region region-area-shortages
+                  :coverage-selection-objective
+                  {:strategy :mandatory-then-incremental-union-greedy-with-bounded-swaps
+                   :regions (:regions optimization)
+                   :best-achieved-union-area union-area
+                   :best-achieved-union-area-by-composition-region region-union-areas
+                   :maximum-swaps-per-region
+                   (get-in policy [:coverage-selection-budget :maximum-swaps-per-region] 16)}
                   :facade-readability facade-evidence :hero-junction-road-layer road-evidence
                   :selection-budget budget-evidence
                   :subject-exclusion subject-screen :ground-y ground-y

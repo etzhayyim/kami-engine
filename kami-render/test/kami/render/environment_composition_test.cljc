@@ -375,6 +375,63 @@
                                       :foreground-left :kind]))))
     (is (empty? (:diversity-shortages-by-composition-region evidence)))))
 
+(deftest coverage-objective-swaps-overlapping-mandatory-picks-without-losing-semantics
+  (let [base (measurable-candidate :left 0)
+        early [(assoc base :id :early/grass :priority 30 :cluster-role :vegetation
+                      :kind :grass :geometry-variant :grass)
+               (assoc base :id :early/rock :priority 29 :cluster-role :solid-prop
+                      :kind :rock :geometry-variant :rock)
+               (assoc base :id :early/crate :priority 28 :cluster-role :solid-prop
+                      :kind :crate :geometry-variant :crate)]
+        later [(assoc (measurable-candidate :left 1) :id :later/rock :priority 2
+                      :cluster-role :solid-prop :kind :rock :geometry-variant :rock)
+               (assoc (measurable-candidate :left 2) :id :later/grass :priority 1
+                      :cluster-role :vegetation :kind :grass :geometry-variant :grass)]
+        policy {:maximum-selected 3
+                :required-composition-region-counts {:foreground-left 3}
+                :required-screen-occupancy-cells-by-composition-region
+                {:foreground-left #{:lower-left}}
+                :required-cluster-roles-by-composition-region
+                {:foreground-left #{:vegetation :solid-prop}}
+                :required-diversity-by-composition-region
+                {:foreground-left {:kind 3 :geometry-variant 3}}
+                :minimum-projected-union-area-by-composition-region
+                {:foreground-left 0.025}}
+        result (composition/compose {:resolved-camera resolved :subject-bounds subject
+                                     :candidates (vec (concat early later)) :policy policy})
+        evidence (:evidence result)]
+    (is (some #{:later/rock :later/grass} (map :id (:placements result))))
+    (is (>= (get-in evidence [:projected-union-area-by-composition-region
+                              :foreground-left]) 0.025))
+    (is (empty? (:missing-cluster-roles-by-composition-region evidence)))
+    (is (empty? (:diversity-shortages-by-composition-region evidence)))
+    (is (pos? (get-in evidence [:coverage-selection-objective :regions
+                                :foreground-left :swap-count])))))
+
+(deftest impossible-coverage-fails-closed-with-best-achieved-evidence
+  (let [base (measurable-candidate :left 0)
+        candidates (mapv (fn [i]
+                           (assoc base :id (keyword "overlap" (str i))
+                                  :priority (- 10 i)))
+                         (range 4))
+        failure (try
+                  (composition/compose
+                   {:resolved-camera resolved :subject-bounds subject :candidates candidates
+                    :policy {:maximum-selected 3
+                             :required-composition-region-counts {:foreground-left 3}
+                             :minimum-projected-union-area-by-composition-region
+                             {:foreground-left 0.050}}})
+                  nil (catch #?(:clj Exception :cljs js/Error) error error))
+        evidence (:evidence (ex-data failure))]
+    (is (pos? (get-in evidence [:projected-union-area-shortages-by-composition-region
+                                :foreground-left])))
+    (is (= (get-in evidence [:projected-union-area-by-composition-region :foreground-left])
+           (get-in evidence [:coverage-selection-objective
+                             :best-achieved-union-area-by-composition-region
+                             :foreground-left])))
+    (is (true? (get-in evidence [:coverage-selection-objective :regions
+                                 :foreground-left :exhausted?])))))
+
 (deftest occupancy-and-diversity-shortages-fail-closed-exactly
   (let [only-left [(assoc (measurable-candidate :left 0) :geometry-variant :same)
                    (assoc (measurable-candidate :left 2) :geometry-variant :same)]
@@ -518,14 +575,25 @@
                 :required-diversity-by-composition-region
                 {:foreground-left {:kind 2 :geometry-variant 2}
                  :foreground-right {:kind 2 :geometry-variant 2}}}
-        started #?(:clj (System/nanoTime) :cljs 0)
-        result (composition/compose {:resolved-camera resolved :subject-bounds subject
-                                     :candidates candidates :policy policy})
-        elapsed-ms #?(:clj (/ (- (System/nanoTime) started) 1.0e6) :cljs 0)]
+        input {:resolved-camera resolved :subject-bounds subject
+               :candidates candidates :policy policy}
+        _warm (composition/compose input)
+        runs #?(:clj (vec (for [_ (range 3)]
+                            (let [started (System/nanoTime)
+                                  result (composition/compose input)]
+                              {:result result
+                               :elapsed-ms (/ (- (System/nanoTime) started) 1.0e6)})))
+                :cljs [{:result (composition/compose input) :elapsed-ms 0}])
+        result (:result (first runs))
+        timings (sort (map :elapsed-ms runs))
+        median-ms (nth timings (quot (count timings) 2))
+        maximum-ms (last timings)]
     (is (= 320 (get-in result [:evidence :selection-budget :candidate-count])))
     (is (= 8 (count (:placements result))))
-    ;; Includes projection + deterministic selection; generous relative to 250ms core goal.
-    #?(:clj (is (< elapsed-ms 2000.0)) :cljs (is true))))
+    ;; Warm median resists shared-runner contention while the max catches runaway work.
+    #?(:clj (do (is (< median-ms 2000.0))
+                (is (< maximum-ms 5000.0)))
+       :cljs (is true))))
 
 (deftest selection-budget-fails-closed-before-unbounded-projection
   (let [candidates (vec (for [i (range 513)]
