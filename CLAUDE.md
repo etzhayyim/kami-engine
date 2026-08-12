@@ -96,7 +96,11 @@ kami-engine adapter surface.
 
 ### Tooling & tests
 
-- **`bb kami`** (root `bb.edn`): `targets` / `plan <t>` / `spec <t>` (packaging matrix, single
+- **`kami` CLI** — **unavailable**. It was `bb kami`, defined in a root `bb.edn`
+  that ADR-2607173000 deleted when babashka was retired; nothing replaced it
+  (ADR-2608131600). The subcommands it exposed are listed here so the capability
+  is not silently lost, not because they can be invoked today:
+  `targets` / `plan <t>` / `spec <t>` (packaging matrix, single
   source of truth in `kami-script-runtime::platform`) · `bake` (datalevin → scene.edn) · `compile`
   (logic.clj → game.wasm) · `host <t>` (cross-build, feature+triple from `kami spec`) · `package mac`
   (relocatable `.app`) · `play` · `test`.
