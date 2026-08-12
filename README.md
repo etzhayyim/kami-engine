@@ -35,9 +35,16 @@ here.
 ## Verify
 
 ```bash
-bb scripts/wit_test.clj
-bb scripts/check_adapter_registry.clj
+nbb scripts/run-task.cljs wit-check       # wit/kami-interface.edn is the ONE source; world.wit must agree
+nbb scripts/run-task.cljs adapter-check   # docs/adapter-registry.edn is well-formed
 ```
+
+These were `bb scripts/…` until 2026-08-13. babashka was retired as this
+workspace's script host by ADR-2607173000 and that conversion left
+`scripts/tasks.edn` a literal empty registry, so both gates were documented but
+unrunnable for four weeks (ADR-2608131600). They now run under JVM Clojure —
+measured 2026-08-13 as "EDN IDL: 40 host functions across 7 interfaces / ✓ EDN
+IDL and world.wit agree" and "ok docs/adapter-registry.edn contracts 3".
 
 The default path should not contain `Cargo.toml`, `Cargo.lock`, `.rs`,
 `rust-toolchain*`, or `.cargo/` files.

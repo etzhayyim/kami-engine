@@ -1,3 +1,20 @@
-;; Auto-generated from bb.edn (ADR-2607173000).
-;; nbb scripts/run-task.cljs <task> [args…]
-{}
+;; Task registry for `nbb scripts/run-task.cljs <task> [args…]` (ADR-2607173000).
+;;
+;; Empty from the Wave-3 conversion until 2026-08-13. bb.edn defined the two
+;; repository gates as (load-file "scripts/…") bodies, which the converter
+;; classifies as :complex and does not carry over; bb.edn was then deleted, so
+;; both gates lost their entrypoint while README.md kept documenting them
+;; (ADR-2608131600, ADR-2608133200). Recovered forms are in
+;; scripts/tasks-complex.edn.
+;;
+;; Both scripts are plain top-to-bottom Clojure, so JVM Clojure runs them as a
+;; script argument exactly the way babashka did. Measured 2026-08-13:
+;;   wit-check     -> "EDN IDL: 40 host functions across 7 interfaces" / agrees
+;;   adapter-check -> "ok docs/adapter-registry.edn contracts 3"
+;;
+;; NOT restored: `gen-wit` (prints world.wit) and `test` (a babashka.process
+;; shell body over the Rust-free repository gates) — those need a port.
+{:wit-check     {:cmd ["clojure" "-M" "scripts/wit_test.clj"]
+                 :doc "Codegen + consistency gate for the kami:engine interface: wit/kami-interface.edn is the ONE source, and world.wit must agree with it."}
+ :adapter-check {:cmd ["clojure" "-M" "scripts/check_adapter_registry.clj"]
+                 :doc "Assert docs/adapter-registry.edn is well-formed and its contracts resolve."}}
