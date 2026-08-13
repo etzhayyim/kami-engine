@@ -1,0 +1,16 @@
+;; kami-engine is an umbrella repository: it has no source of its own at the
+;; root (there is no src/ here). The tools.deps manifests are the per-module
+;; ones -- kami-render/deps.edn, kami-physics/deps.edn and
+;; kami-clj-play/games/survivors/deps.edn -- and CI runs scripts/ directly.
+;;
+;; This file existed as a zero-byte placeholder from 2026-07-18 ("rescue:
+;; preserve dependency WIP", 0 additions) until 2026-08-13. It is kept, rather
+;; than deleted, because it is load-bearing: a consumer that points
+;; :local/root at this repository needs a manifest here, and removing the file
+;; turns that consumer's classpath build into "Manifest file not found"
+;; (measured 2026-08-13 against kami-app-isekai's :cljs-game alias, which
+;; declares io.github.kotoba-lang/kami-engine-clj {:local/root "../kami-engine"}).
+;;
+;; :paths is explicitly empty. An absent :paths defaults to ["src"], which
+;; would put a directory that does not exist on every consumer's classpath.
+{:paths []}
