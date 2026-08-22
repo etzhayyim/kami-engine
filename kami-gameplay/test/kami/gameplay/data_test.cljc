@@ -22,17 +22,27 @@
             [kami.gameplay.support :as s]
             #?(:cljs ["fs" :as fs])))
 
-(def data-dir "../kami-game-scene/data/")
+(def data-dirs
+  "Where the shared tables might be, depending on where the suite was started.
+
+  `../kami-game-scene/data/` when run from `kami-gameplay/`, and
+  `kami-game-scene/data/` when run from the repository root — which is where
+  the workspace's `:jvm-test` fleet gate runs everything. A suite that only
+  worked from one of the two would pass locally and report an unreadable table
+  in CI, and an unreadable table must not look like a table that was checked."
+  ["../kami-game-scene/data/" "kami-game-scene/data/"])
+
+(defn- slurp-edn [path]
+  (try
+    #?(:clj (edn/read-string (slurp path))
+       :cljs (edn/read-string (.readFileSync fs path "utf8")))
+    (catch #?(:clj Exception :cljs :default) _ nil)))
 
 (defn- read-edn
-  "Read a data file, or nil when it is not there. The nil is not swallowed —
-  every caller below fails explicitly on it."
+  "Read a data file from whichever directory has it, or nil. The nil is not
+  swallowed — every caller below fails explicitly on it."
   [f]
-  (let [path (str data-dir f)]
-    (try
-      #?(:clj (edn/read-string (slurp path))
-         :cljs (edn/read-string (.readFileSync fs path "utf8")))
-      (catch #?(:clj Exception :cljs :default) _ nil))))
+  (some #(slurp-edn (str % f)) data-dirs))
 
 (def weapons-file (read-edn "battle_royale_weapons.edn"))
 (def storm-file (read-edn "battle_royale_storm.edn"))
