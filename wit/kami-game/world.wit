@@ -1,82 +1,167 @@
 package kami:engine@1.0.0;
 
 // ---------------------------------------------------------------------------
-// kami:engine/scene — ECS entity lifecycle and transform queries
+// kami:engine/aim ? controller pose and the camera-relative movement basis
 //
-// All positions/velocities are f32 bit-patterns passed as i32.
-// Entity IDs are i64 (hecs Entity bits).  A return of 0 means "not found".
+// The controller pose the ECS has never had: get-r* return constants today
+// and
+// set-rotation is a no-op, so nothing in the contract can express which
+// way an
+// actor is looking.
+//
+// move() is the important one. It takes stick input in CAMERA space and
+// resolves it against the entity's own yaw, so forward means away from the
+// camera. Feeding world axes into set-velocity instead ? which is what the
+// shipped royale does ? is what makes a 3D game play like a map cursor.
 // ---------------------------------------------------------------------------
-interface scene {
-    // Spawn a named entity type; returns a stable entity handle.
-    spawn: func(kind-ptr: s32, kind-len: s32) -> s64;
-    despawn: func(entity: s64);
-
-    // Read transform components — returns IEEE-754 f32 bit-pattern as i32.
-    get-x: func(entity: s64) -> s32;
-    get-y: func(entity: s64) -> s32;
-    get-z: func(entity: s64) -> s32;
-    // Write all three translation components atomically.
-    set-position: func(entity: s64, x: s32, y: s32, z: s32);
-
-    // Velocity
-    get-vx: func(entity: s64) -> s32;
-    get-vy: func(entity: s64) -> s32;
-    get-vz: func(entity: s64) -> s32;
-    set-velocity: func(entity: s64, vx: s32, vy: s32, vz: s32);
-
-    // Rotation (unit quaternion, f32 bit-patterns)
-    get-rx: func(entity: s64) -> s32;
-    get-ry: func(entity: s64) -> s32;
-    get-rz: func(entity: s64) -> s32;
-    get-rw: func(entity: s64) -> s32;
-    set-rotation: func(entity: s64, rx: s32, ry: s32, rz: s32, rw: s32);
-
-    // ---- ECS queries (survivors core loop) ----
-    // Snapshot the entities tagged `tag`; returns an opaque cursor handle.
-    query-begin:  func(tag-ptr: s32, tag-len: s32) -> s64;
-    // Advance the cursor; returns the next entity id, or -1 when drained.
-    query-next:   func(it: s64) -> s64;
-    // Count entities tagged `tag`.
-    count-tagged: func(tag-ptr: s32, tag-len: s32) -> s64;
-    // Nearest entity tagged `tag` within `maxd` of (x,y) [f32 bits]; -1 if none.
-    nearest:      func(tag-ptr: s32, tag-len: s32, x: s32, y: s32, maxd: s32) -> s64;
-    // Set entity velocity toward `target` at `speed` px/s [f32 bits]. Host does
-    // the normalize×speed vector math so scripts need no in-guest f32 arithmetic.
-    move-toward:  func(entity: s64, target: s64, speed: s32);
+interface aim {
+    // Face `target`, applying the scene's configured aim error. Keeps bots and
+    // players on one aiming path, so a bot cannot be more accurate than the
+    // weapon it holds allows.
+    look-at: func(entity: s64, target: s64);
+    // Fold a mouse / stick look delta into the pose.
+    add-look: func(entity: s64, dyaw: s32, dpitch: s32);
+    // Set ground velocity toward a world point at `speed`. Like move-toward but
+    // to a position rather than an entity, so a guest can walk to a zone centre
+    // read from the zone interface without doing arithmetic on it.
+    move-to: func(entity: s64, x: s32, y: s32, z: s32, speed: s32);
+    // Facing around +Y in radians (f32 bits), wrapped to (-pi, pi].
+    yaw: func(entity: s64) -> s32;
+    // Set ground velocity from CAMERA-relative stick input; diagonals are not
+    // faster.
+    move: func(entity: s64, strafe: s32, forward: s32, speed: s32);
+    // Look elevation in radians (f32 bits), clamped by the camera rig.
+    pitch: func(entity: s64) -> s32;
+    // Current aim-down-sight blend.
+    ads: func(entity: s64) -> s32;
+    // Drive the aim-down-sight blend toward held/released at the scene's blend
+    // rate. The guest cannot interpolate a float itself, and a guest that could
+    // would snap the camera instead of blending it.
+    set-ads-held: func(entity: s64, held: s32);
+    // Set the aim-down-sight blend in [0,1]; tightens spread and narrows FOV.
+    set-ads: func(entity: s64, blend: s32);
+    // Write the controller pose absolutely.
+    set-look: func(entity: s64, yaw: s32, pitch: s32);
 }
 
 // ---------------------------------------------------------------------------
-// kami:engine/physics — impulse / force application and raycast
+// kami:engine/zone ? shrinking safe circle (battle-royale storm) as
+// read-only state
+//
+// Read-only. The circle is a pure function of match time
+// (battle_royale_storm.edn),
+// so it is identical on every client without being replicated and a replay
+// lands
+// on the same circle. Distances are ground-plane: jumping does not save
+// you.
+// ---------------------------------------------------------------------------
+interface zone {
+    // Safe-circle centre X (f32 bits).
+    center-x: func() -> s32;
+    // Safe-circle centre Z (f32 bits).
+    center-z: func() -> s32;
+    // Safe-circle radius (f32 bits).
+    radius: func() -> s32;
+    // Current storm phase index.
+    phase: func() -> s32;
+    // Damage per second taken outside the circle (f32 bits).
+    damage-per-second: func() -> s32;
+    // 1 when the entity is within the circle, ground-plane only.
+    inside: func(entity: s64) -> s32;
+    // How far outside the circle the entity is; 0 when safe.
+    distance-outside: func(entity: s64) -> s32;
+    // 0 safe, 1 within the scene's storm margin of the edge, 2 outside the
+    // circle.
+    warning-level: func(entity: s64) -> s32;
+}
+
+// ---------------------------------------------------------------------------
+// kami:engine/weapon ? weapon state machine over the shared weapon table
+//
+// Backed by the shared 25-row weapon table (battle_royale_weapons.edn).
+// fire() returns the entity hit, or -1 for a miss, a refused trigger pull
+// or a
+// projectile still in flight ? the caller distinguishes those with
+// can-fire and
+// the event stream rather than by guessing from the -1.
+// ---------------------------------------------------------------------------
+interface weapon {
+    // Hold weapon `index`, fill the magazine, cancel any reload in flight.
+    equip: func(entity: s64, index: s32);
+    // Index of the held weapon, or -1 when unarmed.
+    equipped: func(entity: s64) -> s32;
+    // 1 when alive, armed, loaded, not reloading and past the fire-rate
+    // interval.
+    can-fire: func(entity: s64) -> s32;
+    // Pull the trigger; returns the entity hit, or -1.
+    fire: func(entity: s64) -> s64;
+    // Begin a reload, if one is warranted.
+    reload: func(entity: s64);
+    // Rounds in the magazine.
+    ammo: func(entity: s64) -> s32;
+    // Rounds in the backpack.
+    reserve-ammo: func(entity: s64) -> s32;
+    // 1 while a reload is in flight.
+    reloading: func(entity: s64) -> s32;
+}
+
+// ---------------------------------------------------------------------------
+// kami:engine/perception ? what an observer is allowed to know: range,
+// cone, occlusion, memory
+//
+// A filter, not a behaviour. The shipped bot calls nearest-tagged with a
+// 3000
+// unit range, so every bot knows where the player is, through walls,
+// always.
+// These honour range, view cone and occlusion, and remember a contact
+// briefly
+// after it breaks line of sight.
+// ---------------------------------------------------------------------------
+interface perception {
+    // 1 when the target is in range, inside the view cone and unoccluded.
+    can-see: func(observer: s64, target: s64) -> s32;
+    // 1 when the target is within hearing range; `loud` widens it to gunshot
+    // range.
+    can-hear: func(observer: s64, target: s64, loud: s32) -> s32;
+    // Nearest perceived entity with `tag`, or -1. Never returns a teammate.
+    sense-nearest: func(observer: s64, tag-ptr: s32, tag-len: s32) -> s64;
+    // Record a contact so it survives a brief loss of line of sight.
+    remember: func(observer: s64, target: s64);
+    // The remembered contact, or -1 once memory has lapsed.
+    remembered: func(observer: s64) -> s64;
+}
+
+// ---------------------------------------------------------------------------
+// kami:engine/time ? game clock
+// ---------------------------------------------------------------------------
+interface time {
+    // Milliseconds elapsed this frame.
+    delta-ms: func() -> s64;
+    // Total milliseconds since engine start (monotonic).
+    elapsed-ms: func() -> s64;
+    // Tick number (fixed-timestep tick counter).
+    tick: func() -> s64;
+}
+
+// ---------------------------------------------------------------------------
+// kami:engine/physics ? impulse / force application and raycast
 // ---------------------------------------------------------------------------
 interface physics {
+    // Instantaneous change of momentum (f32 bits).
     apply-impulse: func(entity: s64, ix: s32, iy: s32, iz: s32);
-    apply-force:   func(entity: s64, fx: s32, fy: s32, fz: s32);
-    // Cast a ray; returns entity hit (i64) or 0 if miss.
-    // Origin + direction as f32 bit-patterns.
+    // Continuous force for this tick (f32 bits).
+    apply-force: func(entity: s64, fx: s32, fy: s32, fz: s32);
+    // Cast a ray; returns the entity hit, or -1 on a miss. Origin + direction as
+    // f32 bit-patterns.
     raycast: func(ox: s32, oy: s32, oz: s32, dx: s32, dy: s32, dz: s32) -> s64;
 }
 
 // ---------------------------------------------------------------------------
-// kami:engine/input — discrete and analog input queries
-// ---------------------------------------------------------------------------
-interface input {
-    // Returns 1 if the named key is currently held, 0 otherwise.
-    key-down:    func(key-ptr: s32, key-len: s32) -> s32;
-    // Returns 1 on the first frame the key was pressed (edge detect).
-    key-pressed: func(key-ptr: s32, key-len: s32) -> s32;
-    // Returns f32 bit-pattern of an analog axis in [-1, 1].
-    axis:        func(name-ptr: s32, name-len: s32) -> s32;
-    // Mouse / touch screen position in canvas pixels (f32 bits).
-    pointer-x:   func() -> s32;
-    pointer-y:   func() -> s32;
-}
-
-// ---------------------------------------------------------------------------
-// kami:engine/render — draw calls issued from script
-// (the real renderer is wgpu; these are command insertions)
+// kami:engine/render ? draw calls issued from script (the real renderer is
+// wgpu)
 // ---------------------------------------------------------------------------
 interface render {
-    // Queue a mesh draw at position (f32 bits).  mesh-name must be registered.
+    // Queue a mesh draw at position (f32 bits). mesh-name must be registered.
     draw-mesh: func(mesh-ptr: s32, mesh-len: s32, x: s32, y: s32, z: s32);
     // Emit a billboard particle burst.
     spawn-particle: func(preset-ptr: s32, preset-len: s32, x: s32, y: s32, z: s32);
@@ -88,33 +173,11 @@ interface render {
 }
 
 // ---------------------------------------------------------------------------
-// kami:engine/audio — fire-and-forget sound triggers
-// ---------------------------------------------------------------------------
-interface audio {
-    play:  func(name-ptr: s32, name-len: s32);
-    stop:  func(name-ptr: s32, name-len: s32);
-    // Spatial: play sound at world position.
-    play-at: func(name-ptr: s32, name-len: s32, x: s32, y: s32, z: s32);
-    // Binaural: set listener position (x,y,z) + forward (fx,fy,fz) as f32 bits.
-    set-listener: func(x: s32, y: s32, z: s32, fx: s32, fy: s32, fz: s32);
-}
-
-// ---------------------------------------------------------------------------
-// kami:engine/time — game clock
-// ---------------------------------------------------------------------------
-interface time {
-    // Milliseconds elapsed this frame.
-    delta-ms:   func() -> s64;
-    // Total milliseconds since engine start (monotonic).
-    elapsed-ms: func() -> s64;
-    // Tick number (fixed-timestep tick counter).
-    tick:       func() -> s64;
-}
-
-// ---------------------------------------------------------------------------
-// kami:engine/random — host-owned seeded PRNG
+// kami:engine/random ? host-owned seeded PRNG (shared-seed determinism for
+// online/replay)
 //
-// The host owns the seed so online co-op stays deterministic (shared-seed):
+// The host owns the seed so online co-op stays deterministic
+// (shared-seed):
 // the same seed + same inputs replay identically, which also backs async
 // race / ghost / anti-cheat. The guest never holds or advances the seed.
 // ---------------------------------------------------------------------------
@@ -124,7 +187,169 @@ interface random {
 }
 
 // ---------------------------------------------------------------------------
-// kami-game world — what a Clojure game-script component imports/exports
+// kami:engine/audio ? fire-and-forget sound triggers + binaural listener
+// pose
+// ---------------------------------------------------------------------------
+interface audio {
+    // Start a named sound.
+    play: func(name-ptr: s32, name-len: s32);
+    // Stop a named sound.
+    stop: func(name-ptr: s32, name-len: s32);
+    // Spatial: play sound at world position.
+    play-at: func(name-ptr: s32, name-len: s32, x: s32, y: s32, z: s32);
+    // Binaural: set listener position (x,y,z) + forward (fx,fy,fz) as f32 bits.
+    set-listener: func(x: s32, y: s32, z: s32, fx: s32, fy: s32, fz: s32);
+}
+
+// ---------------------------------------------------------------------------
+// kami:engine/input ? discrete and analog input queries
+// ---------------------------------------------------------------------------
+interface input {
+    // Returns 1 if the named key is currently held, 0 otherwise.
+    key-down: func(key-ptr: s32, key-len: s32) -> s32;
+    // Returns 1 on the first frame the key was pressed (edge detect).
+    key-pressed: func(key-ptr: s32, key-len: s32) -> s32;
+    // Returns f32 bit-pattern of an analog axis in [-1, 1].
+    axis: func(name-ptr: s32, name-len: s32) -> s32;
+    // Mouse / touch screen position X in canvas pixels (f32 bits).
+    pointer-x: func() -> s32;
+    // Mouse / touch screen position Y in canvas pixels (f32 bits).
+    pointer-y: func() -> s32;
+}
+
+// ---------------------------------------------------------------------------
+// kami:engine/attributes ? named f32 attribute plane per entity (health,
+// team, ammo, facing, ?)
+//
+// The shipped ECS entity is a tag, a position and a velocity. Nothing else
+// can
+// be said about it, which is why a guest written against this contract can
+// only
+// move point masses around a plane.
+//
+// This is one typed channel for everything else ? health, shield, team,
+// facing,
+// ammo, stance, AI state. Adding a mechanic costs a row in the attribute
+// registry rather than a new host import. Unregistered names are legal
+// scratch
+// space and default to 0; registered ones carry a default and a clamp, so
+// a
+// read before any write returns full health rather than nil, and no writer
+// can
+// put an attribute out of range.
+// ---------------------------------------------------------------------------
+interface attributes {
+    // Read a named attribute, or its registered default.
+    get-attr: func(entity: s64, name-ptr: s32, name-len: s32) -> s32;
+    // Write a named attribute, clamped to its registered range.
+    set-attr: func(entity: s64, name-ptr: s32, name-len: s32, value: s32);
+    // Read-modify-write through the clamp; returns the new value.
+    add-attr: func(entity: s64, name-ptr: s32, name-len: s32, delta: s32) -> s32;
+}
+
+// ---------------------------------------------------------------------------
+// kami:engine/combat ? one damage pipeline: shields, armour, teams, kill
+// credit
+//
+// Every health change goes through apply-damage. Once damage can be
+// applied
+// from more than one place, the rules ? team protection, armour, shield
+// order,
+// kill credit ? start to disagree between the places.
+// zone: 0 body, 1 head. Returns the damage actually absorbed, which is
+// what a
+// hit marker and the damage-dealt statistic should both read.
+// ---------------------------------------------------------------------------
+interface combat {
+    // Apply damage through the shared pipeline; returns the amount absorbed.
+    apply-damage: func(instigator: s64, target: s64, amount: s32, zone: s32) -> s32;
+    // Restore health up to the entity's maximum; returns the amount gained.
+    heal: func(target: s64, amount: s32) -> s32;
+    // Add shield up to the entity's maximum; returns the amount gained.
+    add-shield: func(target: s64, amount: s32) -> s32;
+    // 1 when the entity is registered, flagged alive and above 0 health.
+    alive: func(entity: s64) -> s32;
+    // 1 when the two entities are protected from each other (team 0 never is).
+    same-team: func(a: s64, b: s64) -> s32;
+}
+
+// ---------------------------------------------------------------------------
+// kami:engine/match ? GameMode / GameState: entrants, survivors,
+// placements
+//
+// state: 0 pending, 1 live, 2 ended. place() is 0 until the entity is out.
+// Placements count down from the entrant count, so the last survivor is 1.
+// ---------------------------------------------------------------------------
+interface match {
+    // Entrants still alive.
+    alive-count: func() -> s64;
+    // Entrant count fixed at match start.
+    entrants: func() -> s64;
+    // 0 pending, 1 live, 2 ended.
+    state: func() -> s32;
+    // Final placement, or 0 while still alive.
+    place: func(entity: s64) -> s32;
+    // The last survivor, or -1.
+    winner: func() -> s64;
+}
+
+// ---------------------------------------------------------------------------
+// kami:engine/scene ? ECS entity lifecycle and transform queries
+//
+// All positions/velocities are f32 bit-patterns passed as i32.
+// Entity IDs are i64 (hecs Entity bits). A return of -1 means "not found".
+// ---------------------------------------------------------------------------
+interface scene {
+    // Nearest entity tagged `tag` within `maxd` of (x,y) [f32 bits]; -1 if none.
+    nearest: func(tag-ptr: s32, tag-len: s32, x: s32, y: s32, maxd: s32) -> s64;
+    // Remove an entity.
+    despawn: func(entity: s64);
+    // Spawn a named entity type; returns a stable entity handle.
+    spawn: func(kind-ptr: s32, kind-len: s32) -> s64;
+    // Read translation X ? IEEE-754 f32 bit-pattern as i32.
+    get-x: func(entity: s64) -> s32;
+    // Write all three translation components atomically.
+    set-position: func(entity: s64, x: s32, y: s32, z: s32);
+    // Rotation quaternion Z.
+    get-rz: func(entity: s64) -> s32;
+    // Rotation quaternion W.
+    get-rw: func(entity: s64) -> s32;
+    // Read translation Z.
+    get-z: func(entity: s64) -> s32;
+    // Velocity X.
+    get-vx: func(entity: s64) -> s32;
+    // Snapshot the entities tagged `tag`; returns an opaque cursor handle.
+    query-begin: func(tag-ptr: s32, tag-len: s32) -> s64;
+    // Velocity Z.
+    get-vz: func(entity: s64) -> s32;
+    // Write the rotation quaternion.
+    set-rotation: func(entity: s64, rx: s32, ry: s32, rz: s32, rw: s32);
+    // Read translation Y.
+    get-y: func(entity: s64) -> s32;
+    // Velocity Y.
+    get-vy: func(entity: s64) -> s32;
+    // Rotation quaternion Y.
+    get-ry: func(entity: s64) -> s32;
+    // Set entity velocity toward `target` at `speed` px/s [f32 bits]. Host does
+    // the normalize x speed vector math so scripts need no in-guest f32
+    // arithmetic.
+    move-toward: func(entity: s64, target: s64, speed: s32);
+    // Advance the cursor; returns the next entity id, or -1 when drained.
+    query-next: func(it: s64) -> s64;
+    // Count entities tagged `tag`.
+    count-tagged: func(tag-ptr: s32, tag-len: s32) -> s64;
+    // Spawn `kind` at the `index`-th of `of` evenly spaced points on a ring of
+    // `radius`. The guest has no sin/cos, so a ring spawn is otherwise
+    // unexpressible and games hardcode a handful of points instead.
+    spawn-ring: func(kind-ptr: s32, kind-len: s32, radius: s32, index: s32, of: s32) -> s64;
+    // Rotation quaternion X (unit quaternion, f32 bit-patterns).
+    get-rx: func(entity: s64) -> s32;
+    // Write velocity.
+    set-velocity: func(entity: s64, vx: s32, vy: s32, vz: s32);
+}
+
+// ---------------------------------------------------------------------------
+// kami-game world ? what a Clojure game-script component imports/exports
 //
 // Lifecycle:
 //   init()         called once after the WASM module is instantiated.
@@ -134,21 +359,24 @@ interface random {
 //                  well-known integer constant (see kami-script-runtime).
 // ---------------------------------------------------------------------------
 world kami-game {
-    import kami:engine/scene@1.0.0;
-    import kami:engine/physics@1.0.0;
-    import kami:engine/input@1.0.0;
-    import kami:engine/render@1.0.0;
-    import kami:engine/audio@1.0.0;
+    import kami:engine/aim@1.0.0;
+    import kami:engine/zone@1.0.0;
+    import kami:engine/weapon@1.0.0;
+    import kami:engine/perception@1.0.0;
     import kami:engine/time@1.0.0;
+    import kami:engine/physics@1.0.0;
+    import kami:engine/render@1.0.0;
     import kami:engine/random@1.0.0;
-
-    // Every compiled Clojure module exposes linear memory + the cabi bump allocator
-    // so the host can lower string arguments into the guest.
+    import kami:engine/audio@1.0.0;
+    import kami:engine/input@1.0.0;
+    import kami:engine/attributes@1.0.0;
+    import kami:engine/combat@1.0.0;
+    import kami:engine/match@1.0.0;
+    import kami:engine/scene@1.0.0;
     export memory;
     export cabi_realloc: func(old-ptr: s32, old-size: s32, align: s32, new-size: s32) -> s32;
-
-    // Script entry points.
     export init: func();
     export tick: func(dt-ms: s64);
     export on-event: func(kind: s32, payload-ptr: s32, payload-len: s32) -> s32;
 }
+

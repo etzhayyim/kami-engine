@@ -1,0 +1,154 @@
+;; KAMI Royale TPS — gameplay in the kami-clj guest subset.
+;;
+;; Forked from kami-clj-play3d/games/royale/logic.clj. The parent is 50 lines
+;; and does four things: writes two raw input axes into the player's velocity,
+;; drops bots at one of four hardcoded points, walks every bot at the player
+;; from anywhere on the map, and leaves shooting to the host. It has no health,
+;; no weapon, no aim, no ammo, no storm and no win condition — so the most it
+;; can express is a red box converging on a blue box, and no camera makes that
+;; a third-person shooter.
+;;
+;; Every call below is a host import declared in wit/kami-interface.edn and
+;; implemented by kami-gameplay/. The rules live in the engine; the composition
+;; lives here — the split Unreal draws between the engine and a game module.
+;;
+;; Guest subset discipline, inherited from the parent and checked by
+;; `clojure -M scripts/guest_lint.clj`: arithmetic is integer-only and there is
+;; no math library. Every fractional value here is either an `(f32 ...)`
+;; literal or a value passed straight from one host import into another. That
+;; constraint is why `move!`, `move-to!`, `look-at!`, `spawn-ring!` and
+;; `set-ads-held!` take the shape they do — the host does the vector and
+;; interpolation math, exactly as the pre-existing `move-toward!` already did.
+
+;; ── composition (this is the part a game author edits) ─────────────────────
+(def max-bots       23)            ;; + the player = 24 entrants
+(def spawn-every     6)            ;; ticks between drops while filling the lobby
+(def spawn-radius   (f32 420.0))
+(def ring-slots     24)            ;; drop points evenly spaced around the ring
+
+(def player-weapon  16)            ;; common Pistol, battle_royale_weapons.edn
+(def player-reserve (f32 120.0))
+(def bot-reserve    (f32 240.0))
+
+(def walk-speed     (f32 6.4))
+(def sprint-speed   (f32 9.3))
+(def crouch-speed   (f32 3.5))
+(def ads-speed      (f32 3.9))
+(def bot-speed      (f32 5.4))
+(def eye-height     (f32 1.62))
+(def full-health    (f32 100.0))
+
+;; Bot weapon pool, so the opposition is not homogeneous. The parent arms its
+;; bots with nothing at all.
+(def bot-weapon-0    0)            ;; assault rifle
+(def bot-weapon-1    5)            ;; pump shotgun
+(def bot-weapon-2   10)            ;; smg
+(def bot-weapon-3   13)            ;; bolt-action sniper
+(def bot-weapon-4   16)            ;; pistol
+
+(defn player []
+  (nearest-tagged "player" (f32 0.0) (f32 0.0) (f32 9000000.0)))
+
+;; ── init ───────────────────────────────────────────────────────────────────
+(defn init []
+  (let [p (spawn-entity "player")]
+    (set-position! p (f32 0.0) (f32 0.0) (f32 0.0))
+    (set-attr! p "health" full-health)
+    (set-attr! p "move-speed" walk-speed)
+    (set-attr! p "eye-height" eye-height)
+    (equip! p player-weapon)
+    (set-attr! p "reserve-ammo" player-reserve)))
+
+;; ── the player ─────────────────────────────────────────────────────────────
+;; Two calls here are the whole difference between this and the parent.
+;;
+;;   move!  takes strafe/forward in CAMERA space and resolves them against the
+;;          player's own yaw. The parent writes raw axes into set-velocity!, so
+;;          "forward" means world +X and the stick steers a map cursor. This is
+;;          the single change that stops a 3D game playing like a top-down one.
+;;
+;;   fire!  goes through the weapon state machine: fire rate, magazine, reload,
+;;          spread, falloff, hitboxes, headshots. The parent's shooting is a
+;;          host-side auto-fire that cannot miss, so aiming is not a skill the
+;;          game has.
+(defsystem control [dt]
+  (let [p (player)]
+    (when (not= p -1)
+      (when (not= 0 (alive? p))
+        (add-look! p (axis "LookX") (axis "LookY"))
+        (set-ads-held! p (key-down "Fire2"))
+
+        ;; stance and pace. Sighted movement is slowest, so aiming costs
+        ;; something; sprinting is fastest and the engine widens the cone for
+        ;; it, so it costs something too.
+        (cond
+          (not= 0 (key-down "Fire2"))  (set-attr! p "move-speed" ads-speed)
+          (not= 0 (key-down "Crouch")) (set-attr! p "move-speed" crouch-speed)
+          (not= 0 (key-down "Sprint")) (set-attr! p "move-speed" sprint-speed)
+          :else                        (set-attr! p "move-speed" walk-speed))
+        (if (not= 0 (key-down "Crouch"))
+          (set-attr! p "stance" (f32 1.0))
+          (set-attr! p "stance" (f32 0.0)))
+
+        (move! p (axis "MoveX") (axis "MoveY") (attr p "move-speed"))
+
+        (when (not= 0 (key-down "Fire1"))
+          (when (not= 0 (can-fire? p))
+            (fire! p)))
+        (when (not= 0 (key-pressed "Reload"))
+          (reload! p))))))
+
+;; ── filling the lobby ──────────────────────────────────────────────────────
+;; Bots drop on an evenly spaced ring. Besides being a better spread than four
+;; hardcoded points, this sidesteps a defect in the shipped browser host: its
+;; PRNG loses precision in JavaScript and `(rand-int 4)` returns a constant
+;; after the first draw, so the parent's four spawn points collapse to one and
+;; the entire opposition arrives from a single direction in single file.
+;; `spawn-ring!` needs no draw at all — the slot is the bot's own index.
+(defsystem drop [dt]
+  (when (< (count-tagged "bot") max-bots)
+    (when (zero? (mod (tick-n) spawn-every))
+      (let [n (count-tagged "bot")
+            e (spawn-ring! "bot" spawn-radius n ring-slots)]
+        (set-attr! e "health" full-health)
+        (set-attr! e "move-speed" bot-speed)
+        (set-attr! e "eye-height" eye-height)
+        (case (mod n 5)
+          0 (equip! e bot-weapon-0)
+          1 (equip! e bot-weapon-1)
+          2 (equip! e bot-weapon-2)
+          3 (equip! e bot-weapon-3)
+          (equip! e bot-weapon-4))
+        (set-attr! e "reserve-ammo" bot-reserve)))))
+
+;; ── the opposition ─────────────────────────────────────────────────────────
+;; Policy, not behaviour. The state machine, the aim error, the reload cadence
+;; and the spread belong to the engine. What this game decides is that its bots
+;; value surviving the storm over winning a fight, and that they shoot only at
+;; what they can actually see — where the parent's bots track the player across
+;; the whole map, through walls, forever.
+(defsystem bots [dt]
+  (doseq-entities [e "bot"]
+    (when (not= 0 (alive? e))
+      (if (zero? (in-zone? e))
+        (move-to! e (zone-center-x) (f32 0.0) (zone-center-z) (attr e "move-speed"))
+        (let [t (sense-nearest e "player")]
+          (when (not= t -1)
+            (remember! e t)
+            (look-at! e t)
+            (when (not= 0 (can-see? e t))
+              (when (not= 0 (can-fire? e))
+                (fire! e)))))))))
+
+;; ── the storm ──────────────────────────────────────────────────────────────
+;; Damage, placement and the end condition are the engine's. This is only the
+;; warning the HUD reads — but the parent has neither, because it has no match:
+;; bots respawn forever and there is no state in which the player has won.
+(defsystem storm-hud [dt]
+  (let [p (player)]
+    (when (not= p -1)
+      (when (not= 0 (alive? p))
+        (case (storm-warning p)
+          0 (set-attr! p "hud-storm" (f32 0.0))
+          1 (set-attr! p "hud-storm" (f32 0.5))
+          (set-attr! p "hud-storm" (f32 1.0)))))))

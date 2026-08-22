@@ -51,16 +51,61 @@
   (str (name fname) ": func(" (str/join ", " (mapcat param-strs params)) ")"
        (when (and ret (not= ret :unit)) (str " -> " (wit-type ret))) ";"))
 
+;; ── prose carried by the source, not by the generated file ───────────────────
+;; world.wit is a generated artifact, so every regeneration overwrites whatever
+;; is in it. It used to carry all of this interface's documentation and none of
+;; that documentation existed in wit/kami-interface.edn, which meant the file
+;; declared to be "the ONE source" was the source of signatures only, and
+;; `--gen` silently deleted the rest. The docs now live in the EDN (`:doc` per
+;; function, `:notes` per interface) and are emitted from there.
+(def ^:private rule (apply str (repeat 75 "-")))
+
+(defn- wrap
+  "Soft-wrap `text` to `width` columns, prefixing every line with `prefix`."
+  [prefix width text]
+  (->> (str/split (str text) #"\s+")
+       (reduce (fn [lines w]
+                 (let [cur (peek lines)]
+                   (if (and cur (<= (+ (count cur) 1 (count w)) width))
+                     (conj (pop lines) (str cur " " w))
+                     (conj lines w))))
+               [])
+       (map #(str prefix %))
+       (str/join "\n")))
+
+(defn- interface-banner [package iname ispec]
+  (str "// " rule "\n"
+       (wrap "// " 72 (str (str/replace package #"@.*" "") "/" (name iname)
+                           " — " (:doc ispec)))
+       (when (seq (:notes ispec))
+         (str "\n//\n"
+              (str/join "\n" (map (fn [n] (if (str/blank? n) "//" (wrap "// " 72 n)))
+                                   (:notes ispec)))))
+       "\n// " rule))
+
 (defn gen-wit
-  "Regenerate the full world.wit text from the EDN IDL."
+  "Regenerate the full world.wit text from the EDN IDL, documentation included."
   [idl]
   (str "package " (:package idl) ";\n\n"
        (str/join "\n\n"
          (for [[iname ispec] (:interfaces idl)]
-           (str "// " (:doc ispec) "\ninterface " (name iname) " {\n"
-                (str/join "\n" (for [[fn spec] (:funcs ispec)] (str "    " (wit-func fn spec))))
+           (str (interface-banner (:package idl) iname ispec)
+                "\ninterface " (name iname) " {\n"
+                (str/join "\n"
+                  (for [[fn spec] (:funcs ispec)]
+                    (str (when (:doc spec) (str (wrap "    // " 74 (:doc spec)) "\n"))
+                         "    " (wit-func fn spec))))
                 "\n}")))
-       "\n\nworld " (:world idl) " {\n"
+       "\n\n// " rule "\n"
+       (wrap "// " 72 (str (:world idl) " world — what a Clojure game-script component imports/exports"))
+       "\n//\n// Lifecycle:\n"
+       "//   init()         called once after the WASM module is instantiated.\n"
+       "//   tick(dt-ms)    called every engine tick with the delta time in ms.\n"
+       "//   on-event(kind, payload-ptr, payload-len)\n"
+       "//                  called for input / collision / custom events; kind is a\n"
+       "//                  well-known integer constant (see kami-script-runtime).\n"
+       "// " rule "\n"
+       "world " (:world idl) " {\n"
        (str/join "\n" (for [[iname _] (:interfaces idl)]
                         (str "    import " (str/replace (:package idl) "@" (str "/" (name iname) "@")) ";")))
        "\n    export memory;\n"
@@ -95,7 +140,39 @@
     (println (format "  WIT:     %d" (count w)))
     (when (seq edn-only) (println "  WIT drift — only in EDN:" (vec edn-only)))
     (when (seq wit-only) (println "  WIT drift — only in WIT:" (vec wit-only)))
-    (if (= g w)
-      (println "  ✓ EDN IDL and world.wit agree.")
+    (when-not (= g w)
       (throw (ex-info "kami:engine interface DRIFT"
-                      {:wit-only wit-only :edn-only edn-only})))))
+                      {:wit-only wit-only :edn-only edn-only})))
+    (println "  ✓ EDN IDL and world.wit agree.")
+
+    ;; Signature agreement is not the whole contract. An undocumented host
+    ;; function is one a game author has to guess at, and guessing is how the
+    ;; shipped royale ended up with its shooting in the host instead of in the
+    ;; game. Documentation is required of the EDN and asserted to survive into
+    ;; the generated file, because it was the generator that used to delete it.
+    (let [undocumented (sort (for [[iname ispec] (:interfaces idl)
+                                   [fname fspec] (:funcs ispec)
+                                   :when (str/blank? (:doc fspec))]
+                               (str (name iname) "." (name fname))))
+          ;; Compare against the comment TEXT, not the raw file: the generator
+          ;; soft-wraps and prefixes every line, so a doc string is never
+          ;; present verbatim in the output. Strip the prefixes first, then
+          ;; collapse whitespace on both sides.
+          flat (-> (gen-wit idl)
+                   (str/replace #"(?m)^\s*//[ \t]?" "")
+                   (str/replace #"\s+" " "))
+          dropped (sort (for [[iname ispec] (:interfaces idl)
+                              [fname fspec] (:funcs ispec)
+                              :let [d (:doc fspec)]
+                              :when (and (not (str/blank? d))
+                                         (not (str/includes? flat (str/replace d #"\s+" " "))))]
+                          (str (name iname) "." (name fname))))]
+      (println (format "  Documented: %d/%d host functions"
+                       (- (count g) (count undocumented)) (count g)))
+      (when (seq undocumented)
+        (throw (ex-info "kami:engine interface functions without :doc"
+                        {:undocumented (vec undocumented)})))
+      (when (seq dropped)
+        (throw (ex-info "generator dropped documentation the EDN declares"
+                        {:functions (vec dropped)})))
+      (println "  ✓ every host function is documented, and the generator keeps it."))))
