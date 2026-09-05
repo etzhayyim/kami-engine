@@ -1,0 +1,150 @@
+;; guest-bindings.edn — the kami-clj name for each kami:engine host import.
+;;
+;; wit/kami-interface.edn declares what the HOST provides. It does not say what
+;; a `.clj` guest may write, and until now nothing did: the vocabulary lived in
+;; a paragraph of kami-genre-base-systems' README and in whatever the compiler
+;; happened to accept. A game author reaching for a function that does not exist
+;; found out at compile time at best, and at link time in the browser at worst.
+;;
+;; Two rules this file encodes, both of them consequences of the guest subset's
+;; integer-only arithmetic:
+;;
+;;   * Every fractional value a guest handles is either an `(f32 ...)` literal
+;;     or a value read straight from a host import and passed straight back into
+;;     one. There is no guest-side float math, so any host function that expects
+;;     the guest to compute one is unusable — which is why `move-toward` takes a
+;;     speed and does the normalise itself, and why `spawn-ring`, `move-to`,
+;;     `look-at`, `set-ads-held` and `warning-level` were added in that shape.
+;;   * There is no math library. No sin, cos, sqrt, min, max, or float compare.
+;;
+;; `scripts/guest_lint.clj` checks games against this file.
+
+{:core-forms
+ ;; Compiler forms and pure-INTEGER operators the kami-clj subset accepts.
+ ;;
+ ;; The base set is the vocabulary kami-genre-base-systems records as confirmed
+ ;; end-to-end through kami-engine-clj. The second group is the "expanded forms"
+ ;; kami-clj-play/games/waves was written to exercise and names in its own
+ ;; header — they were in use for months with nothing recording that they exist.
+ ;;
+ ;; Note what is NOT here: no sin, cos, sqrt or float compare, and the
+ ;; arithmetic is integer-only. `clamp` and `max` operate on the integer side.
+ ;; A fractional value is an `(f32 ...)` literal or a value handed from one host
+ ;; import straight to another, never something the guest computes.
+ #{def defn defsystem defatom ns
+   let if when cond do
+   f32 set-atom! get-atom
+   + - * mod quot inc dec
+   = not= < > <= >= zero? not and or
+   ;; expanded forms — see kami-clj-play/games/waves
+   -> case dotimes even? odd? max min clamp}
+
+ :bindings
+ {;; scene
+  spawn-entity        scene/spawn
+  despawn-entity      scene/despawn
+  spawn-ring!         scene/spawn-ring
+  get-x               scene/get-x
+  get-y               scene/get-y
+  get-z               scene/get-z
+  set-position!       scene/set-position
+  get-vx              scene/get-vx
+  get-vy              scene/get-vy
+  get-vz              scene/get-vz
+  set-velocity!       scene/set-velocity
+  set-rotation!       scene/set-rotation
+  count-tagged        scene/count-tagged
+  nearest-tagged      scene/nearest
+  move-toward!        scene/move-toward
+
+  ;; physics
+  apply-impulse!      physics/apply-impulse
+  apply-force!        physics/apply-force
+  raycast             physics/raycast
+
+  ;; input
+  key-down            input/key-down
+  key-pressed         input/key-pressed
+  axis                input/axis
+  pointer-x           input/pointer-x
+  pointer-y           input/pointer-y
+
+  ;; render / audio
+  draw-mesh!          render/draw-mesh
+  spawn-particle!     render/spawn-particle
+  draw-line!          render/draw-line
+  play-sound!         audio/play
+  stop-sound!         audio/stop
+  ;; names taken from the shipped games rather than guessed: rt-audio-demo has
+  ;; been calling exactly these three for months
+  play-sound-at       audio/play-at
+  set-listener!       audio/set-listener
+  rt-enable!          render/rt-enable
+
+  ;; time / random
+  tick-n              time/tick
+  elapsed-ms          time/elapsed-ms
+  delta-ms            time/delta-ms
+  rand-int            random/int
+
+  ;; attributes
+  attr                attributes/get-attr
+  set-attr!           attributes/set-attr
+  add-attr!           attributes/add-attr
+
+  ;; combat
+  damage!             combat/apply-damage
+  heal!               combat/heal
+  add-shield!         combat/add-shield
+  alive?              combat/alive
+  same-team?          combat/same-team
+
+  ;; weapon
+  equip!              weapon/equip
+  equipped            weapon/equipped
+  can-fire?           weapon/can-fire
+  fire!               weapon/fire
+  reload!             weapon/reload
+  ammo                weapon/ammo
+  reserve-ammo        weapon/reserve-ammo
+  reloading?          weapon/reloading
+
+  ;; aim
+  yaw                 aim/yaw
+  pitch               aim/pitch
+  set-look!           aim/set-look
+  add-look!           aim/add-look
+  move!               aim/move
+  move-to!            aim/move-to
+  look-at!            aim/look-at
+  set-ads!            aim/set-ads
+  set-ads-held!       aim/set-ads-held
+  ads                 aim/ads
+
+  ;; zone
+  zone-center-x       zone/center-x
+  zone-center-z       zone/center-z
+  zone-radius         zone/radius
+  zone-phase          zone/phase
+  zone-dps            zone/damage-per-second
+  in-zone?            zone/inside
+  distance-outside    zone/distance-outside
+  storm-warning       zone/warning-level
+
+  ;; perception
+  can-see?            perception/can-see
+  can-hear?           perception/can-hear
+  sense-nearest       perception/sense-nearest
+  remember!           perception/remember
+  remembered          perception/remembered
+
+  ;; match
+  alive-count         match/alive-count
+  entrants            match/entrants
+  match-state         match/state
+  place               match/place
+  winner              match/winner}
+
+ :iteration
+ ;; Not host imports: compiler macros that expand into query-begin/query-next.
+ {doseq-entities scene/query-begin}}

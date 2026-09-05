@@ -35,9 +35,22 @@ here.
 ## Verify
 
 ```bash
-nbb scripts/run-task.cljs wit-check       # wit/kami-interface.edn is the ONE source; world.wit must agree
-nbb scripts/run-task.cljs adapter-check   # docs/adapter-registry.edn is well-formed
+clojure -M scripts/wit_test.clj            # wit/kami-interface.edn is the ONE source; world.wit must agree
+clojure -M scripts/check_adapter_registry.clj  # docs/adapter-registry.edn is well-formed
+clojure -M scripts/guest_lint.clj          # every kami-clj game stays inside wit/guest-bindings.edn
+cd kami-gameplay && clojure -M:test        # gameplay rules, JVM
+cd kami-gameplay && npx --yes nbb bin/run_tests.cljs   # the same suite under Node
 ```
+
+`wit-check` also asserts that every host function carries documentation and that
+the generator preserves it. It did not before: `world.wit` is generated, all of
+this interface's prose lived only in that file, and every `--gen` deleted it. The
+prose now lives in the EDN.
+
+`guest-lint` is new (see `wit/guest-bindings.edn`). The kami-clj vocabulary a
+game may use was previously recorded only in a paragraph of another repository's
+README, so a game reaching for a name that does not exist found out at compile
+time at best and at link time in the browser at worst.
 
 These were `bb scripts/…` until 2026-08-13. babashka was retired as this
 workspace's script host by ADR-2607173000 and that conversion left

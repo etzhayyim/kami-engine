@@ -1,0 +1,17 @@
+;; network-isekai game manifest — open data (CodePen-style: view source + fork).
+{:id      "royale-tps"
+ :title   "KAMI Royale"
+ :author  "gftdcojp / kami-engine"
+ :source  "orgs/com-junkawasaki/kami-engine/kami-clj-play3d/games/royale-tps"
+ :forked-from "orgs/com-junkawasaki/kami-engine/kami-clj-play3d/games/royale"
+ :runtime :model-a            ;; CLJS brain + kami-web wasm renderer (ADR-0001)
+ :files   {:scene "scene.edn" :logic "logic.clj"}
+ :license "public-domain"     ;; resources are open
+ :resources []                ;; procedural — no external assets; props/terrain are code
+ :starter 2                   ;; ADR-0009 rank 2 — battle royale, no building.
+ :tags    ["battle-royale" "third-person-shooter" "3d" "edn" "clj"]
+ :requires {:engine "kami:engine@1.0.0"
+            :interfaces [:scene :physics :input :render :audio :time :random
+                         :attributes :combat :weapon :aim :zone :perception :match]
+            :data ["battle_royale_weapons.edn" "battle_royale_storm.edn"]}
+ :thumbnail "thumbnail.svg"}

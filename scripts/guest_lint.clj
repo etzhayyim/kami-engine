@@ -1,0 +1,153 @@
+;; guest_lint.clj — check a kami-clj game against the declared guest vocabulary.
+;;
+;;   clojure -M scripts/guest_lint.clj [<game-dir> ...]
+;;
+;; A `.clj` game compiles to WASM whose imports must all resolve against
+;; kami:engine/*. A call to something that is not a host import, not a compiler
+;; form and not defined in the file either fails to compile or — worse — links
+;; and traps in the browser. Nothing checked for it, so the vocabulary was
+;; whatever the last author happened to remember.
+;;
+;; Two failure modes this catches, both of which happened while writing
+;; games/royale-tps:
+;;
+;;   * reaching for arithmetic the guest does not have. The subset is
+;;     integer-only with no math library, so `(* speed dt)` on floats, `sin`,
+;;     `cos`, `min` and `max` are all unavailable. Every fractional value must
+;;     be an `(f32 ...)` literal or a value passed straight through from one
+;;     host import to another.
+;;   * reaching for a host function that does not exist under the name used.
+;;
+;; It also enforces arity against wit/kami-interface.edn, since a wrong-arity
+;; import is a link error rather than a compile error.
+
+(require '[clojure.edn :as edn] '[clojure.string :as str] '[clojure.java.io :as io])
+
+(defn- unblob
+  "The IDL is stored datomised: nested maps are pr-str'd into string attrs.
+  Re-read the ones that are EDN collections and leave the rest alone — the
+  package string `kami:engine@1.0.0` is not readable EDN, so this must not
+  assume every string is a blob."
+  [v]
+  (if (string? v)
+    (try (let [p (edn/read-string v)] (if (coll? p) p v))
+         (catch Exception _ v))
+    v))
+
+(def idl
+  (let [c (edn/read-string (slurp "wit/kami-interface.edn"))]
+    (if (and (vector? c) (map? (first c)) (contains? (first c) :db/id))
+      (into {} (map (fn [[k v]] [(keyword (name k)) (unblob v)])) (dissoc (first c) :db/id))
+      c)))
+
+(def guest (edn/read-string (slurp "wit/guest-bindings.edn")))
+
+(def host-arity
+  (into {} (for [[iname ispec] (:interfaces idl) [fname fspec] (:funcs ispec)]
+             [(symbol (name iname) (name fname)) (count (:params fspec))])))
+
+(defn- forms
+  "Every list form in a file, read with a reader that tolerates the guest's
+  `#` -free syntax. Reads the whole file as a sequence of top-level forms."
+  [f]
+  (let [rdr (java.io.PushbackReader. (io/reader f))]
+    (loop [out []]
+      (let [v (read {:eof ::eof :read-cond :preserve} rdr)]
+        (if (= v ::eof) out (recur (conj out v)))))))
+
+(defn- calls
+  "Head symbols of every list in the tree — i.e. everything invoked."
+  [form]
+  (cond
+    (and (list? form) (seq form))
+    (let [h (first form)]
+      (concat (when (symbol? h) [[h (dec (count form))]])
+              (mapcat calls (rest form))
+              (when-not (symbol? h) (calls h))))
+    (coll? form) (mapcat calls form)
+    :else nil))
+
+(defn- defined
+  "Names the file itself introduces: defs, defns, defsystems, defatoms, and
+  every binding a `let`, `defn` or `defsystem` parameter vector introduces."
+  [fs]
+  (let [named (atom #{})]
+    (letfn [(walk [f]
+              (when (and (list? f) (seq f))
+                (let [[h a b] f]
+                  (when (and (symbol? h) (#{'def 'defn 'defsystem 'defatom} h) (symbol? a))
+                    (swap! named conj a))
+                  (when (and (symbol? h) (#{'defn 'defsystem} h) (vector? b))
+                    (swap! named into (filter symbol? b)))
+                  (when (and (symbol? h) (= 'let h) (vector? a))
+                    (swap! named into (take-nth 2 a)))))
+              (when (coll? f) (doseq [x f] (walk x))))]
+      (doseq [f fs] (walk f)))
+    @named))
+
+(defn lint-game [dir]
+  (let [f (io/file dir "logic.clj")]
+    (when-not (.exists f)
+      (throw (ex-info "no logic.clj — refusing to report a pass on an absent game"
+                      {:dir (str dir)})))
+    (let [fs (forms f)
+          local (defined fs)
+          core (:core-forms guest)
+          bindings (:bindings guest)
+          iteration (:iteration guest)
+          seen (distinct (mapcat calls fs))
+          unknown (sort (distinct (for [[s _] seen
+                                        :when (not (or (contains? core s)
+                                                       (contains? bindings s)
+                                                       (contains? iteration s)
+                                                       (contains? local s)
+                                                       (str/starts-with? (name s) ".")))]
+                                    s)))
+          bad-arity (sort (distinct
+                            (for [[s n] seen
+                                  :let [host (get bindings s)]
+                                  :when (and host (host-arity host)
+                                             (not= n (host-arity host)))]
+                              (str s " called with " n " args; "
+                                   host " takes " (host-arity host)))))
+          used (count (filter #(contains? bindings (first %)) seen))]
+      {:dir (str dir) :forms (count fs) :calls (count seen)
+       :host-imports-used used :unknown unknown :bad-arity bad-arity})))
+
+(def targets
+  (let [args (remove #(str/starts-with? % "--") *command-line-args*)]
+    (if (seq args)
+      (map io/file args)
+      (->> (concat (.listFiles (io/file "kami-clj-play3d/games"))
+                   (.listFiles (io/file "kami-clj-play/games")))
+           (filter #(.isDirectory %))
+           (filter #(.exists (io/file % "logic.clj")))
+           sort))))
+
+(println "── kami-clj guest vocabulary ──")
+(println (format "  declared: %d host bindings, %d core forms"
+                 (count (:bindings guest)) (count (:core-forms guest))))
+
+;; Evidence floor: a run that found no games must not look like a clean run.
+(when (empty? targets)
+  (println "  REFUSING TO REPORT A PASS: no games found under kami-clj-play*/games")
+  (System/exit 3))
+
+(let [results (mapv lint-game targets)
+      broken (filter #(or (seq (:unknown %)) (seq (:bad-arity %))) results)]
+  (doseq [r results]
+    (println (format "  %-46s %3d calls, %2d host imports%s"
+                     (:dir r) (:calls r) (:host-imports-used r)
+                     (if (or (seq (:unknown r)) (seq (:bad-arity r))) "  ✗" "  ok"))))
+  (doseq [r broken]
+    (when (seq (:unknown r))
+      (println "\n  " (:dir r) "calls names the guest does not have:")
+      (doseq [u (:unknown r)] (println "     " u)))
+    (when (seq (:bad-arity r))
+      (println "\n  " (:dir r) "arity mismatches:")
+      (doseq [b (:bad-arity r)] (println "     " b))))
+  (println (format "\n  %d games checked, %d clean" (count results)
+                   (- (count results) (count broken))))
+  (when (seq broken)
+    (System/exit 1))
+  (println "  ✓ every game stays inside the declared guest vocabulary."))

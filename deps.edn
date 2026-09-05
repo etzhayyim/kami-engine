@@ -13,4 +13,17 @@
 ;;
 ;; :paths is explicitly empty. An absent :paths defaults to ["src"], which
 ;; would put a directory that does not exist on every consumer's classpath.
-{:paths []}
+;;
+;; The :test alias added 2026-08-22 does not change that. It exists because the
+;; workspace's :jvm-test fleet gate runs `clojure -M:test` at a repository root
+;; and nothing else, so a suite that lives in a subdirectory is a suite that
+;; gate cannot see. kami-engine is not registered in scripts/fleet-ci/gates.edn
+;; at all today; this is the precondition for registering it, not the
+;; registration. An alias adds nothing to :paths, so a consumer pointing
+;; :local/root here is unaffected.
+{:paths []
+ :aliases
+ {:test {:extra-paths ["kami-gameplay/src" "kami-gameplay/test"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+         :main-opts ["-m" "cognitect.test-runner" "-d" "kami-gameplay/test"]}}}
