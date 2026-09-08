@@ -7,7 +7,7 @@
 ;;   bb scripts/wit_test.clj --gen     # print the regenerated WIT
 (require '[clojure.set :as set]
          '[clojure.edn :as edn]
-         '[clojure.string :as str])
+         '[kotoba.lang.text :as str])
 
 ;; wit/kami-interface.edn was datomic/datascript-ized by edn-datomize.cljs
 ;; (wrap-map, ns="wit.kami-interface"): top level is now `[{:db/id -1
