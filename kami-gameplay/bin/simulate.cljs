@@ -13,7 +13,7 @@
 ;; below is produced by the same code path the browser host would run.
 (ns simulate
   (:require [clojure.edn :as edn]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [kami.gameplay.world :as world]
             [kami.gameplay.match :as match]
             [kami.gameplay.zone :as zone]
